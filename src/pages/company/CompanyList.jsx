@@ -111,7 +111,7 @@
 // };
 //   return (
 //     <div className="p-6">
-      
+
 //       {/* Header */}
 //       <div className="flex justify-between items-center mb-6">
 //         <h1 className="text-2xl font-semibold text-gray-700">
@@ -130,7 +130,7 @@
 //       <div className="bg-white rounded-xl shadow overflow-hidden">
 
 //         <table className="w-full text-sm text-left">
-          
+
 //          <thead className="bg-gray-100 text-gray-600 uppercase text-xs">
 //   <tr>
 //     <th className="px-6 py-3">Logo</th>
@@ -207,8 +207,8 @@
 
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import api, { API_BASE_URL } from "../../services/api";
-import { Pencil,  Power, Building2, ChevronLeft, ChevronRight, Search } from "lucide-react";
+import api, { API_BASE_URL, API_BASE_URL_IMAGE } from "../../services/api";
+import { Pencil, Power, Building2, ChevronLeft, ChevronRight, Search } from "lucide-react";
 
 const ITEMS_PER_PAGE = 5;
 
@@ -221,8 +221,8 @@ export default function CompanyList() {
 
   const MAX_COMPANIES = 3;
 
-const isLimitReached =
-  companies.length >= MAX_COMPANIES;
+  const isLimitReached =
+    companies.length >= MAX_COMPANIES;
 
   const fetchCompanies = async () => {
     try {
@@ -254,47 +254,47 @@ const isLimitReached =
   //   }
   // };
 
-  
- const toggleStatus = async (company) => {
 
-  const newStatus =
-    company.status === "active"
-      ? "inactive"
-      : "active";
+  const toggleStatus = async (company) => {
 
-  try {
+    const newStatus =
+      company.status === "active"
+        ? "inactive"
+        : "active";
 
-    const res = await api.post(
-      "/company/toggle_company_status",
-      {
-        id: company.id,
-        company_status: newStatus,
-      }
-    );
+    try {
 
-    if (res.data.success) {
-
-      setCompanies((prev) =>
-        prev.map((c) =>
-          c.id === company.id
-            ? { ...c, status: newStatus }
-            : c
-        )
+      const res = await api.post(
+        "/company/toggle_company_status",
+        {
+          id: company.id,
+          company_status: newStatus,
+        }
       );
 
-    } else {
+      if (res.data.success) {
 
-      alert(res.data.message);
+        setCompanies((prev) =>
+          prev.map((c) =>
+            c.id === company.id
+              ? { ...c, status: newStatus }
+              : c
+          )
+        );
+
+      } else {
+
+        alert(res.data.message);
+
+      }
+
+    } catch (err) {
+
+      console.error(err);
+      alert("Server error");
 
     }
-
-  } catch (err) {
-
-    console.error(err);
-    alert("Server error");
-
-  }
-};
+  };
   const filtered = companies.filter(c =>
     c.company_name?.toLowerCase().includes(search.toLowerCase()) ||
     c.company_code?.toLowerCase().includes(search.toLowerCase()) ||
@@ -582,49 +582,48 @@ const isLimitReached =
               <p className="cl-subtitle">Manage your registered companies</p>
             </div>
           </div>
-         <button
-  className={`cl-add-btn ${
-    isLimitReached
-      ? "disabled"
-      : ""
-  }`}
-  disabled={isLimitReached}
-  onClick={() => {
+          <button
+            className={`cl-add-btn ${isLimitReached
+                ? "disabled"
+                : ""
+              }`}
+            disabled={isLimitReached}
+            onClick={() => {
 
-    if (!isLimitReached) {
+              if (!isLimitReached) {
 
-      navigate("/company/add");
+                navigate("/company/add");
 
-    }
+              }
 
-  }}
->
-  + Add Company
-</button>
+            }}
+          >
+            + Add Company
+          </button>
         </div>
 
         {isLimitReached && (
 
-  <div className="cl-limit-note">
+          <div className="cl-limit-note">
 
-    <div>
-      Maximum 3 companies only allowed.
-      To add more companies,
-      please send a request.
-    </div>
+            <div>
+              Maximum 3 companies only allowed.
+              To add more companies,
+              please send a request.
+            </div>
 
-    <button
-      className="cl-request-btn"
-      onClick={() =>
-        navigate("/company/add")
-      }
-    >
-      Request Company
-    </button>
+            <button
+              className="cl-request-btn"
+              onClick={() =>
+                navigate("/company/add")
+              }
+            >
+              Request Company
+            </button>
 
-  </div>
+          </div>
 
-)}
+        )}
 
         {/* Search */}
         <div className="cl-search-wrap">
@@ -639,116 +638,115 @@ const isLimitReached =
 
         {/* Table card */}
         <div className="cl-card">
-           <div className="cl-table-wrap">
-          <table className="cl-table">
-            <thead  className="bg-blue-600">
-              <tr>
-                <th className="cl-th">#</th>
-                <th className="cl-th">Company</th>
-                <th className="cl-th">Code</th>
-                <th className="cl-th">GSTIN</th>
-                <th className="cl-th">Phone</th>
-                <th className="cl-th">Address</th>
-                <th className="cl-th center">Actions</th>
-                <th className="cl-th">Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {paginated.length === 0 ? (
+          <div className="cl-table-wrap">
+            <table className="cl-table">
+              <thead className="bg-blue-600">
                 <tr>
-                  <td colSpan={7}>
-                    <div className="cl-empty">
-                      <div className="cl-empty-icon">
-                        <Building2 size={26} color="#94a3b8" />
-                      </div>
-                      <p>{search ? "No companies match your search." : "No companies found."}</p>
-                      <span>{search ? "Try a different keyword." : "Click '+ Add Company' to get started."}</span>
-                    </div>
-                  </td>
+                  <th className="cl-th">#</th>
+                  <th className="cl-th">Company</th>
+                  <th className="cl-th">Code</th>
+                  <th className="cl-th">GSTIN</th>
+                  <th className="cl-th">Phone</th>
+                  <th className="cl-th">Address</th>
+                  <th className="cl-th center">Actions</th>
+                  <th className="cl-th">Status</th>
                 </tr>
-              ) : (
-                paginated.map((c, idx) => (
-                  <tr key={c.id} className="cl-tr">
-
-                    {/* Serial */}
-                    <td className="cl-td">
-                      <span className="cl-badge cl-badge-gray">
-                        {(safePage - 1) * ITEMS_PER_PAGE + idx + 1}
-                      </span>
-                    </td>
-
-                    {/* Company name + logo */}
-                    <td className="cl-td">
-                      <div className="cl-company-cell">
-                        <div className="cl-avatar">
-                          {c.logo
-                            ? <img src={c.logo.startsWith("http") ? c.logo : `${API_BASE_URL}/${c.logo}`} alt={c.company_name} />
-                            : getInitials(c.company_name)
-                          }
+              </thead>
+              <tbody>
+                {paginated.length === 0 ? (
+                  <tr>
+                    <td colSpan={7}>
+                      <div className="cl-empty">
+                        <div className="cl-empty-icon">
+                          <Building2 size={26} color="#94a3b8" />
                         </div>
-                        <div>
-                          <div className="cl-company-name">{c.company_name}</div>
-                          {c.email && <div className="cl-company-sub">{c.email}</div>}
-                        </div>
+                        <p>{search ? "No companies match your search." : "No companies found."}</p>
+                        <span>{search ? "Try a different keyword." : "Click '+ Add Company' to get started."}</span>
                       </div>
                     </td>
-
-                    {/* Code */}
-                    <td className="cl-td">
-                      <span className="cl-badge cl-badge-blue">{c.company_code || "—"}</span>
-                    </td>
-
-                    {/* GSTIN */}
-                    <td className="cl-td">
-                      <span className="cl-text-muted">{c.gstin || "—"}</span>
-                    </td>
-
-                    {/* Phone */}
-                    <td className="cl-td">
-                      <span className="cl-text-muted">{c.phone || "—"}</span>
-                    </td>
-
-                    {/* Address */}
-                    <td className="cl-td">
-                      <span className="cl-text-muted" style={{maxWidth:180, display:"block", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap"}}>
-                        {c.company_address || "—"}
-                      </span>
-                    </td>
-
-                    {/* Actions */}
-                    <td className="cl-td">
-                      <div className="cl-actions">
-                        <button className="cl-btn-edit" title="Edit" onClick={() => navigate(`/company/edit/${c.id}`)}>
-                          <Pencil size={16} />
-                        </button>
-                <label className="cl-switch">
-  <input
-    type="checkbox"
-    checked={c.status === "active"}
-    onChange={() => toggleStatus(c)}
-  />
-  <span className="cl-slider"></span>
-</label>
-                      </div>
-                    </td>
-
-                    <td className="cl-td">
-  <span
-    className={`cl-badge ${
-      c.status === "active"
-        ? "cl-badge-blue"
-        : "cl-badge-gray"
-    }`}
-  >
-    {c.status}
-  </span>
-</td>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-</div>
+                ) : (
+                  paginated.map((c, idx) => (
+                    <tr key={c.id} className="cl-tr">
+
+                      {/* Serial */}
+                      <td className="cl-td">
+                        <span className="cl-badge cl-badge-gray">
+                          {(safePage - 1) * ITEMS_PER_PAGE + idx + 1}
+                        </span>
+                      </td>
+
+                      {/* Company name + logo */}
+                      <td className="cl-td">
+                        <div className="cl-company-cell">
+                          <div className="cl-avatar">
+                            {c.logo
+                              ? <img src={c.logo.startsWith("http") ? c.logo : `${API_BASE_URL_IMAGE}/${c.logo}`} alt={c.company_name} />
+                              : getInitials(c.company_name)
+                            }
+                          </div>
+                          <div>
+                            <div className="cl-company-name">{c.company_name}</div>
+                            {c.email && <div className="cl-company-sub">{c.email}</div>}
+                          </div>
+                        </div>
+                      </td>
+
+                      {/* Code */}
+                      <td className="cl-td">
+                        <span className="cl-badge cl-badge-blue">{c.company_code || "—"}</span>
+                      </td>
+
+                      {/* GSTIN */}
+                      <td className="cl-td">
+                        <span className="cl-text-muted">{c.gstin || "—"}</span>
+                      </td>
+
+                      {/* Phone */}
+                      <td className="cl-td">
+                        <span className="cl-text-muted">{c.phone || "—"}</span>
+                      </td>
+
+                      {/* Address */}
+                      <td className="cl-td">
+                        <span className="cl-text-muted" style={{ maxWidth: 180, display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {c.company_address || "—"}
+                        </span>
+                      </td>
+
+                      {/* Actions */}
+                      <td className="cl-td">
+                        <div className="cl-actions">
+                          <button className="cl-btn-edit" title="Edit" onClick={() => navigate(`/company/edit/${c.id}`)}>
+                            <Pencil size={16} />
+                          </button>
+                          <label className="cl-switch">
+                            <input
+                              type="checkbox"
+                              checked={c.status === "active"}
+                              onChange={() => toggleStatus(c)}
+                            />
+                            <span className="cl-slider"></span>
+                          </label>
+                        </div>
+                      </td>
+
+                      <td className="cl-td">
+                        <span
+                          className={`cl-badge ${c.status === "active"
+                              ? "cl-badge-blue"
+                              : "cl-badge-gray"
+                            }`}
+                        >
+                          {c.status}
+                        </span>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
           {/* Pagination */}
           {filtered.length > ITEMS_PER_PAGE && (
             <div className="cl-pagination">
@@ -773,7 +771,7 @@ const isLimitReached =
                   }, [])
                   .map((item, i) =>
                     item === "..." ? (
-                      <span key={`dots-${i}`} style={{padding:"0 4px", color:"#94a3b8", fontSize:13}}>…</span>
+                      <span key={`dots-${i}`} style={{ padding: "0 4px", color: "#94a3b8", fontSize: 13 }}>…</span>
                     ) : (
                       <button
                         key={item}
@@ -796,8 +794,8 @@ const isLimitReached =
               </div>
             </div>
           )}
-        
-</div>
+
+        </div>
       </div>
     </>
   );

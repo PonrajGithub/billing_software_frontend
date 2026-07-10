@@ -295,6 +295,61 @@ export default function EditCustomer() {
     setTimeout(() => setToast(null), 3000);
   };
 
+  const [isCreditAuthorized, setIsCreditAuthorized] = useState(false);
+  const [otpSent, setOtpSent] = useState(false);
+  const [adminEmail, setAdminEmail] = useState("");
+  const [enteredOtp, setEnteredOtp] = useState("");
+  const [isSendingOtp, setIsSendingOtp] = useState(false);
+  const [isVerifyingOtp, setIsVerifyingOtp] = useState(false);
+
+  const handleSendCreditOtp = async () => {
+    setIsSendingOtp(true);
+    try {
+      const user = JSON.parse(localStorage.getItem("user"));
+      const res = await api.post("/auth/send_otp_for_credit", {
+        user_id: user?.id,
+        role: user?.role
+      });
+      if (res.data.status === "success") {
+        setAdminEmail(res.data.email);
+        setOtpSent(true);
+        showToast(res.data.message || "OTP sent successfully!");
+      } else {
+        showToast(res.data.message || "Failed to send OTP", false);
+      }
+    } catch (err) {
+      console.error(err);
+      showToast("Error sending OTP", false);
+    } finally {
+      setIsSendingOtp(false);
+    }
+  };
+
+  const handleVerifyCreditOtp = async () => {
+    if (!enteredOtp.trim()) {
+      showToast("Please enter the OTP code", false);
+      return;
+    }
+    setIsVerifyingOtp(true);
+    try {
+      const res = await api.post("/auth/verify_otp", {
+        email: adminEmail,
+        otp: enteredOtp.trim()
+      });
+      if (res.data.status === "success") {
+        setIsCreditAuthorized(true);
+        showToast("Credit limit authorized successfully!");
+      } else {
+        showToast(res.data.message || "Invalid OTP code", false);
+      }
+    } catch (err) {
+      console.error(err);
+      showToast("Error verifying OTP", false);
+    } finally {
+      setIsVerifyingOtp(false);
+    }
+  };
+
   useEffect(() => {
     (async () => {
       try {
@@ -302,9 +357,11 @@ export default function EditCustomer() {
           `/customer/get_customer_by_id?id=${id}`
         );
         if (res.data.status) {
+          const isEnabled = Number(res.data.data.credit_enabled) === 1;
+          setIsCreditAuthorized(isEnabled);
           setForm({
             ...res.data.data,
-            credit_enabled: Number(res.data.data.credit_enabled)
+            credit_enabled: isEnabled ? 1 : 0
           });
         } else {
           showToast("Customer not found", false);
@@ -342,6 +399,11 @@ export default function EditCustomer() {
         showToast("Invalid GST format (e.g. 22ABCDE1234F1Z5)", false);
         return;
       }
+    }
+
+    if (form.credit_enabled === 1 && !isCreditAuthorized) {
+      showToast("Please verify admin OTP to authorize credit limit", false);
+      return;
     }
 
     setLoading(true);
@@ -448,7 +510,15 @@ export default function EditCustomer() {
           <label style={label}>Credit Enabled</label>
           <select
             value={form.credit_enabled}
-            onChange={e => set("credit_enabled", Number(e.target.value))}
+            onChange={e => {
+              const val = Number(e.target.value);
+              set("credit_enabled", val);
+              if (val === 0) {
+                setIsCreditAuthorized(false);
+                setOtpSent(false);
+                setEnteredOtp("");
+              }
+            }}
             style={input}
           >
             <option value={0}>No</option>
@@ -456,24 +526,93 @@ export default function EditCustomer() {
           </select>
 
           {Number(form.credit_enabled) === 1 && (
-            <>
-              <label style={label}>Credit Limit</label>
-              <input
-                type="number"
-                value={form.credit_limit || ""}
-                onChange={e => set("credit_limit", e.target.value)}
-                style={input}
-              />
+            <div style={{
+              background: "#f8fafc", padding: "12px 14px", borderRadius: 12,
+              border: "1px solid #e2e8f0", marginBottom: 12
+            }}>
+              {!isCreditAuthorized ? (
+                <div>
+                  <p style={{ margin: "0 0 10px", fontSize: 12, fontWeight: 600, color: "#475569" }}>
+                    Credit limit authorization is required.
+                  </p>
+                  {!otpSent ? (
+                    <button
+                      onClick={handleSendCreditOtp}
+                      disabled={isSendingOtp}
+                      style={{
+                        width: "100%", padding: "10px", borderRadius: 10,
+                        border: "none", background: "#3b82f6", color: "#fff",
+                        fontWeight: 700, cursor: "pointer", fontSize: 13
+                      }}
+                    >
+                      {isSendingOtp ? "Sending OTP..." : "Verify Admin Email OTP"}
+                    </button>
+                  ) : (
+                    <div>
+                      <p style={{ margin: "0 0 8px", fontSize: 11, color: "#64748b" }}>
+                        OTP sent to admin email: <strong>{adminEmail}</strong>
+                      </p>
+                      <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+                        <input
+                          placeholder="Enter OTP"
+                          value={enteredOtp}
+                          maxLength={6}
+                          onChange={e => setEnteredOtp(e.target.value.replace(/\D/g, ""))}
+                          style={{
+                            flex: 1, padding: "8px 10px", borderRadius: 8,
+                            border: "1px solid #cbd5e1", outline: "none", fontSize: 13
+                          }}
+                        />
+                        <button
+                          onClick={handleVerifyCreditOtp}
+                          disabled={isVerifyingOtp}
+                          style={{
+                            padding: "8px 14px", borderRadius: 8,
+                            border: "none", background: "#10b981", color: "#fff",
+                            fontWeight: 700, cursor: "pointer", fontSize: 13
+                          }}
+                        >
+                          {isVerifyingOtp ? "Verifying..." : "Verify"}
+                        </button>
+                      </div>
+                      <button
+                        onClick={handleSendCreditOtp}
+                        disabled={isSendingOtp}
+                        style={{
+                          background: "none", border: "none", color: "#3b82f6",
+                          fontSize: 11, fontWeight: 600, cursor: "pointer", padding: 0
+                        }}
+                      >
+                        Resend OTP
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}>
+                    <span style={{ color: "#10b981", fontWeight: 700, fontSize: 12 }}>✓ Credit Limit Authorized</span>
+                  </div>
+                  
+                  <label style={label}>Credit Limit</label>
+                  <input
+                    type="number"
+                    value={form.credit_limit || ""}
+                    onChange={e => set("credit_limit", e.target.value)}
+                    style={input}
+                  />
 
-              <label style={label}>Credit Days</label>
-              <input
-                type="number"
-                placeholder="Enter credit days"
-                value={form.credit_days || ""}
-                onChange={e => set("credit_days", e.target.value)}
-                style={input}
-              />
-            </>
+                  <label style={label}>Credit Days</label>
+                  <input
+                    type="number"
+                    placeholder="Enter credit days"
+                    value={form.credit_days || ""}
+                    onChange={e => set("credit_days", e.target.value)}
+                    style={input}
+                  />
+                </>
+              )}
+            </div>
           )}
 
           <button
