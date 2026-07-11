@@ -42,6 +42,7 @@ export default function Login() {
           role: role,
           company_id: userData.company_id || null,
           admin_id: userData.admin_id || null,
+          active_token: res.data.active_token || null,
         };
 
         localStorage.setItem("user", JSON.stringify(user));

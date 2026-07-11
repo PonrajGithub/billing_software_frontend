@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import api from "../services/api";
 import { Outlet, useNavigate, useLocation } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -39,7 +40,15 @@ export default function MainLayout() {
   }, [user, navigate]);
 
   // 🔥 LOGOUT
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    try {
+      const userObj = JSON.parse(localStorage.getItem("user") || "{}");
+      if (userObj && userObj.id) {
+        await api.post("/auth/logout", { id: userObj.id, role: userObj.role });
+      }
+    } catch (err) {
+      console.error(err);
+    }
     localStorage.clear();
     navigate("/");
   };
