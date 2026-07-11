@@ -607,13 +607,27 @@ function DesignStripe({ invoice, company, color, logoUrl }) {
 //     minute: "2-digit"
 //   });
 function DesignPOS({ invoice, company, logoUrl }) {
-  const createdAt = invoice.created_at ? new Date(invoice.created_at) : new Date();
-  const date = createdAt.toLocaleDateString("en-IN");
-  const time = createdAt.toLocaleTimeString("en-IN", {
-    hour: "2-digit",
-    minute: "2-digit"
-  });
+  // const createdAt = invoice.created_at ? new Date(invoice.created_at) : new Date();
+  // const date = createdAt.toLocaleDateString("en-IN");
+  // const time = createdAt.toLocaleTimeString("en-IN", {
+  //   hour: "2-digit",
+  //   minute: "2-digit"
+  // });
 
+  let date = "-";
+let time = "-";
+
+if (invoice.created_at) {
+  const dt = new Date(invoice.created_at.replace(" ", "T"));
+
+  date = dt.toLocaleDateString("en-GB").replace(/\//g, "-");
+
+  time = dt.toLocaleTimeString("en-IN", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: true,
+  });
+}
   const S = {
     wrap: {
       fontFamily: "'Courier New', monospace",
@@ -669,7 +683,7 @@ const balance = invoice.paid_amount - invoice.total_amount;
 )}
 
       {/* HEADER */}
-      <div style={S.center}>44
+      <div style={S.center}>
         <div style={{ fontSize: 16, fontWeight: "bold" }}>
           {company?.company_name}
         </div>

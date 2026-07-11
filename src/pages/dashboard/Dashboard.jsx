@@ -1,4 +1,6 @@
+//password change
 // import { useEffect, useState, useRef } from "react";
+// import { useNavigate } from "react-router-dom";
 // import api from "../../services/api";
 // import {
 //   BarChart, Bar, XAxis, YAxis, Tooltip,
@@ -6,7 +8,7 @@
 // } from "recharts";
 // import {
 //   TrendingUp, Package, AlertTriangle,
-//   ShoppingBag, BarChart2, Wallet, Clock, IndianRupee,Bell 
+//   ShoppingBag, BarChart2, Wallet, Clock, IndianRupee,Bell,ChevronDown
 // } from "lucide-react";
 
 // function useStyles() {
@@ -108,6 +110,12 @@
 //   useStyles();
 //   const font = "'Plus Jakarta Sans', sans-serif";
 
+//   const navigate = useNavigate();
+
+// const user = JSON.parse(localStorage.getItem("user") || "{}");
+
+// const [showProfile, setShowProfile] = useState(false);
+
 //   /* ── Company State ── */
 //   const [companies, setCompanies]         = useState([]);
 //   const [selectedCompany, setSelectedCompany] = useState(
@@ -121,13 +129,15 @@
 //   const [creditList, setCreditList]     = useState([]);
 //   const [loading, setLoading]           = useState(false);
 //   const [activeBar, setActiveBar]       = useState(null);
+//   const [unsoldProducts,setUnsoldProducts]=useState([]);
 
 
 //   const [showNotif,   setShowNotif]   = useState(false);
 // const [overdueList, setOverdueList] = useState([]);
-// const user = JSON.parse(localStorage.getItem("user") || "{}");
+
 // const isAdmin = user?.role === "admin";
 // const bellRef = useRef(null);
+// const profileRef = useRef(null);
 
 
 // const [notifPos, setNotifPos] = useState({
@@ -140,9 +150,9 @@
 //   useEffect(() => {
 //     const loadCompanies = async () => {
 //       try {
-//         const user = JSON.parse(localStorage.getItem("user"));
+//         // const user = JSON.parse(localStorage.getItem("user"));
 //         const adminId = user.role === "cashier" ? user.admin_id : user.id;
-//         const res = await api.get(`/company/get_companies_by_admin?admin_id=${adminId}`);
+//         const res = await api.get(`/company/get_companies_by_admin?admin_id=${adminId}&role=${user.role}`);
 //         if (res.data.status) {
 //           setCompanies(res.data.data || []);
 //           /* Auto-select first company if none saved */
@@ -196,6 +206,38 @@
 //     } catch (e) { console.error(e); }
 //   };
 
+//   const fetchUnsoldProducts = async () => {
+
+//     try{
+
+//         const res = await api.get(
+//             `/dashboard/get_unsold_products_notification?company_id=${selectedCompany}`
+//         );
+
+//         if(res.data.status){
+
+//             setUnsoldProducts(res.data.data);
+
+//         }
+
+//     }catch(err){
+
+//         console.log(err);
+
+//     }
+
+// };
+
+// useEffect(()=>{
+
+//     if(selectedCompany){
+
+//         fetchUnsoldProducts();
+
+//     }
+
+// },[selectedCompany]);
+
 // const fetchCreditDashboard = async (companyId) => {
 //   try {
 //     const res = await api.get(`/dashboard/get_dashboard?company_id=${companyId}`);
@@ -211,7 +253,7 @@
 
 // const fetchNotifications = async () => {
 
-//     const user = JSON.parse(localStorage.getItem("user"));
+//     // const user = JSON.parse(localStorage.getItem("user"));
 
 //     const adminId =
 //         user.role === "cashier"
@@ -247,13 +289,14 @@
 //   const tdStyle = (bg = "#fff") => ({ padding: "13px 20px", fontSize: 14, color: "#374151", background: bg });
 
 
-//   useEffect(() => {
+//  useEffect(() => {
 //   const handler = (e) => {
 //     if (!e.target.closest(".notif-bell")) setShowNotif(false);
+//     if (profileRef.current && !profileRef.current.contains(e.target)) setShowProfile(false);
 //   };
-//   if (showNotif) document.addEventListener("mousedown", handler);
+//   document.addEventListener("mousedown", handler);
 //   return () => document.removeEventListener("mousedown", handler);
-// }, [showNotif]);
+// }, []);
 
 
 //   return (
@@ -302,6 +345,69 @@
 //             <span style={{ fontSize: 12, fontWeight: 700, color: "#4338ca" }}>Live data</span>
 //           </div>
 
+
+
+//         <div
+//     ref={profileRef}
+//     style={{ position: "relative" }}
+// >
+//     <button
+//         onClick={() => setShowProfile(v => !v)}
+//         style={{
+//             height: 42,
+//             padding: "0 16px",
+//             borderRadius: 12,
+//             border: "1.5px solid #e0e7ff",
+//             background: showProfile ? "#eef2ff" : "#fff",
+//             cursor: "pointer",
+//             fontWeight: 700,
+//             display: "flex",
+//             alignItems: "center",
+//             gap: 5
+//         }}
+//     >
+//         {user.name}
+//         <ChevronDown size={16} />
+//     </button>
+
+//     {showProfile &&
+//         <div
+//             style={{
+//                 position: "absolute",
+//                 right: 0,
+//                 top: 48,
+//                 width: 180,
+//                 background: "#fff",
+//                 borderRadius: 12,
+//                 boxShadow: "0 10px 25px rgba(0,0,0,.12)",
+//                 overflow: "hidden",
+//                 zIndex: 9999
+//             }}
+//         >
+//             {(user.role === "admin" || user.role === "cashier") && (
+//                 <div
+//                     style={{ padding: 14, cursor: "pointer" }}
+//                     onClick={() => {
+//                         setShowProfile(false);
+//                         navigate("/change-password");
+//                     }}
+//                 >
+//                     🔒 Change Password
+//                 </div>
+//             )}
+
+//             <div
+//                 style={{ padding: 14, cursor: "pointer", color: "red" }}
+//                 onClick={() => {
+//                     localStorage.clear();
+//                     navigate("/");
+//                 }}
+//             >
+//                 🚪 Logout
+//             </div>
+//         </div>
+//     }
+// </div>
 //           {/* Bell Notification — admin only */}
 // {isAdmin && (
 //   <div ref={bellRef} style={{ position:"relative", zIndex: 1000 }}>
@@ -319,7 +425,8 @@
 //       }}
 //     >
 //       <Bell size={18} color="#4338ca"/>
-//       {overdueList.length > 0 && (
+//       {/* {overdueList.length > 0 && ( */}
+//       {(overdueList.length + unsoldProducts.length) > 0 && (
 //         <span style={{
 //           position:"absolute", top:-6, right:-6,
 //           background:"#dc2626", color:"#fff",
@@ -327,7 +434,8 @@
 //           display:"flex", alignItems:"center",
 //           justifyContent:"center", fontSize:11, fontWeight:800,
 //         }}>
-//           {overdueList.length}
+//           {/* {overdueList.length} */}
+//           {overdueList.length + unsoldProducts.length}
 //         </span>
 //       )}
 //     </button>
@@ -353,17 +461,41 @@
 //           <div style={{ display:"flex", alignItems:"center", gap:8 }}>
 //             <Bell size={15} color="#fff"/>
 //             <span style={{ color:"#fff", fontWeight:800, fontSize:14 }}>
-//               Overdue Alerts
+//               Notifications
 //             </span>
 //           </div>
-//           <span style={{
+//           {/* <span style={{
 //             background:"#dc2626", color:"#fff",
 //             borderRadius:20, padding:"2px 10px",
 //             fontSize:11, fontWeight:800,
 //           }}>
 //             {overdueList.length} overdue
-//           </span>
+//           </span> */}
+//           <span
+//   style={{
+//     background:"#dc2626",
+//     color:"#fff",
+//     borderRadius:20,
+//     padding:"2px 10px",
+//     fontSize:11,
+//     fontWeight:800
+//   }}
+// >
+//   {overdueList.length + unsoldProducts.length} Alerts
+// </span>
 //         </div>
+//          <div
+//     style={{
+//         background:"#fef2f2",
+//         padding:"10px 15px",
+//         fontWeight:700,
+//         color:"#dc2626",
+//         borderTop:"1px solid #fecaca",
+//         borderBottom:"1px solid #fecaca"
+//     }}
+//     >
+//         💰 Overdue Customers
+//     </div>
 
 //         {/* List */}
 //         <div style={{ maxHeight:320, overflowY:"auto" }}>
@@ -402,8 +534,7 @@
 //           ))}
 //         </div>
 
-//         {/* Footer */}
-//         {overdueList.length > 0 && (
+//          {(overdueList.length + unsoldProducts.length) > 0 && (
 //           <div style={{
 //             padding:"12px 18px", borderTop:"1px solid #f1f5f9",
 //             background:"#fafafa", textAlign:"center",
@@ -429,6 +560,97 @@
 //             </span>
 //           </div>
 //         )}
+
+//         {unsoldProducts.length>0 && (
+
+// <div
+// style={{
+// background:"#fff7ed",
+// padding:"10px 15px",
+// fontWeight:700,
+// color:"#c2410c",
+// borderTop:"1px solid #fde68a",
+// borderBottom:"1px solid #fde68a"
+// }}
+// >
+
+// 📦 Unsold Products
+
+// </div>
+
+// )}
+
+// {unsoldProducts.map((p,i)=>(
+
+// <div
+// key={i}
+// style={{
+// padding:"12px 18px",
+// borderBottom:"1px solid #f3f4f6"
+// }}
+// >
+
+// <div
+// style={{
+// fontWeight:700,
+// color:"#1e1b4b"
+// }}
+// >
+
+// 📦 {p.product_name}
+
+// </div>
+
+// <div
+// style={{
+// fontSize:12,
+// color:"#dc2626",
+// marginTop:4
+// }}
+// >
+
+// {
+// p.last_sale=="Never Billed"
+// ?
+// "Never billed"
+// :
+// `No billing for ${p.days} days`
+// }
+
+// </div>
+
+// </div>
+
+// ))}
+
+//         {/* Footer */}
+//         {/* {overdueList.length > 0 && ( */}
+//         {/* {(overdueList.length + unsoldProducts.length) > 0 && (
+//           <div style={{
+//             padding:"12px 18px", borderTop:"1px solid #f1f5f9",
+//             background:"#fafafa", textAlign:"center",
+//           }}>
+//             <span style={{ fontSize:12, color:"#6366f1", fontWeight:700, cursor:"pointer" }}
+// onClick={() => {
+
+//     if (bellRef.current) {
+
+//         const rect = bellRef.current.getBoundingClientRect();
+
+//         setNotifPos({
+//             top: rect.bottom + 10,
+//             left: rect.right - 340,
+//         });
+
+//     }
+
+//     setShowNotif(v => !v);
+
+// }}            >
+//               Total Overdue: ₹{overdueList.reduce((s,c) => s + Number(c.outstanding), 0).toLocaleString()}
+//             </span>
+//           </div>
+//         )} */}
 //       </div>
 //     )}
 //   </div>
@@ -584,7 +806,6 @@
 // }
 
 
-//password change
 import { useEffect, useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "../../services/api";
@@ -594,7 +815,8 @@ import {
 } from "recharts";
 import {
   TrendingUp, Package, AlertTriangle,
-  ShoppingBag, BarChart2, Wallet, Clock, IndianRupee,Bell,ChevronDown
+  ShoppingBag, BarChart2, Wallet, Clock, IndianRupee,Bell,ChevronDown,
+  Lock, LogOut
 } from "lucide-react";
 
 function useStyles() {
@@ -956,7 +1178,7 @@ useEffect(()=>{
         <ChevronDown size={16} />
     </button>
 
-    {showProfile &&
+    {/* {showProfile &&
         <div
             style={{
                 position: "absolute",
@@ -992,7 +1214,102 @@ useEffect(()=>{
                 🚪 Logout
             </div>
         </div>
-    }
+    } */}
+    {showProfile &&
+    <div
+        style={{
+            position: "absolute",
+            right: 0,
+            top: 50,
+            width: 210,
+            background: "#fff",
+            borderRadius: 14,
+            border: "1.5px solid #eef0ff",
+            boxShadow: "0 12px 32px rgba(30,27,75,.14)",
+            overflow: "hidden",
+            zIndex: 9999,
+            animation: "db-up .18s ease both",
+        }}
+    >
+        {/* User info header */}
+        <div style={{
+            padding: "14px 16px",
+            background: "#fafaff",
+            borderBottom: "1px solid #f1f1f8",
+        }}>
+            <div style={{ fontSize: 13, fontWeight: 800, color: "#1e1b4b", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                {user.name}
+            </div>
+            <div style={{ fontSize: 11, color: "#9ca3af", fontWeight: 600, textTransform: "capitalize", marginTop: 2 }}>
+                {user.role}
+            </div>
+        </div>
+
+        {(user.role === "admin" || user.role === "cashier") && (
+            <div
+                className="db-row"
+                style={{
+                    padding: "12px 16px",
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 10,
+                    whiteSpace: "nowrap",
+                }}
+                onClick={() => {
+                    setShowProfile(false);
+                    navigate("/change-password");
+                }}
+            >
+                <div style={{
+                    width: 30, height: 30, borderRadius: 9,
+                    background: "#eef2ff",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    flexShrink: 0,
+                }}>
+                    <Lock size={14} color="#4338ca" />
+                </div>
+                <span style={{ fontSize: 13.5, fontWeight: 700, color: "#1e1b4b" }}>
+                    Change Password
+                </span>
+            </div>
+        )}
+
+        <div
+            className="db-row"
+            style={{
+                padding: "12px 16px",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+                borderTop: "1px solid #f4f4fa",
+            }}
+          onClick={async () => {
+  const user = JSON.parse(localStorage.getItem("user") || "{}");
+  try {
+    await api.post("/auth/logout", { id: user.id, role: user.role });
+  } catch (err) {
+    console.error(err);
+  }
+  localStorage.clear();
+  navigate("/");
+}}
+        >
+            <div style={{
+                width: 30, height: 30, borderRadius: 9,
+                background: "#fff1f2",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                flexShrink: 0,
+            }}>
+                <LogOut size={14} color="#dc2626" />
+            </div>
+            <span  style={{ fontSize: 13.5, fontWeight: 700, color: "#dc2626" }}>
+                Logout
+            </span>
+        </div>
+    </div>
+}
 </div>
           {/* Bell Notification — admin only */}
 {isAdmin && (
