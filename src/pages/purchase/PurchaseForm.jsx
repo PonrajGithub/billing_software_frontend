@@ -4,10 +4,17 @@ import api from "../../services/api";
 import { ArrowLeft, Save, UploadCloud, Plus, Trash2, HelpCircle } from "lucide-react";
 import * as XLSX from "xlsx";
 
+const unitOptions = [
+  "Piece", "Kg", "Gram", "Litre", "ML", "Meter", "Feet", 
+  "Box", "Pack", "Dozen", "Pair", "Roll", "Bag", "Bottle", 
+  "Can", "Set"
+];
+
 export default function PurchaseForm() {
   const navigate = useNavigate();
   const { id } = useParams(); // Draft ID if editing
 
+  const [companies, setCompanies] = useState([]);
   const [selectedCompany, setSelectedCompany] = useState(
     localStorage.getItem("selected_company_id") || ""
   );
@@ -22,7 +29,26 @@ export default function PurchaseForm() {
   const [saving, setSaving] = useState(false);
   const [isLocked, setIsLocked] = useState(false); // Locked if submitted
 
-  // Load basic configurations
+  // Category, Subcategory, and Brand Cache states
+  const [categories, setCategories] = useState([]);
+  const [companySubcategories, setCompanySubcategories] = useState({}); // catId -> subcategories
+  const [companyBrands, setCompanyBrands] = useState({}); // `${catId}-${subcatId}` -> brands
+
+  // Load Companies
+  useEffect(() => {
+    const user = JSON.parse(localStorage.getItem("user"));
+    if (user?.id) {
+      api.get(`/company/get_companies_by_admin?admin_id=${user.id}`)
+        .then(res => {
+          if (res.data.status) {
+            setCompanies(res.data.data);
+          }
+        })
+        .catch(console.error);
+    }
+  }, []);
+
+  // Load basic configurations when company or draft ID changes
   useEffect(() => {
     if (!selectedCompany) return;
 
@@ -31,6 +57,15 @@ export default function PurchaseForm() {
       .then(res => {
         if (res.data.status) {
           setSuppliers(res.data.data);
+        }
+      })
+      .catch(console.error);
+
+    // Load Categories for selected company
+    api.get(`/category/get_active_category?company_id=${selectedCompany}`)
+      .then(res => {
+        if (res.data.status) {
+          setCategories(res.data.data);
         }
       })
       .catch(console.error);
@@ -57,8 +92,10 @@ export default function PurchaseForm() {
               subcategory_name: item.subcategory_name || "",
               brand_name: item.brand_name || "",
               price: Number(item.price),
+              selling_price: Number(item.selling_price || 0),
+              selling_price_per_unit: item.selling_price_per_unit || "",
               quantity: Number(item.quantity),
-              unit: item.unit || "pcs",
+              unit: item.unit || "Piece",
               gst_percentage: Number(item.gst_percentage),
               product_id: item.product_id,
               category_id: item.category_id,
@@ -69,6 +106,30 @@ export default function PurchaseForm() {
               warnings: []
             }));
             setItems(formatted);
+
+            // Prefetch subcategories and brands caches for loaded items
+            const uniqueCats = [...new Set(p.items.map(i => i.category_id).filter(Boolean))];
+            uniqueCats.forEach(catId => {
+              api.get(`/subcategory/get_active_subcategory?company_id=${p.company_id}&category_id=${catId}`)
+                .then(resSub => {
+                  if (resSub.data.status) {
+                    setCompanySubcategories(prev => ({ ...prev, [catId]: resSub.data.data }));
+                  }
+                });
+            });
+
+            p.items.forEach(item => {
+              if (item.category_id && item.subcategory_id) {
+                const key = `${item.category_id}-${item.subcategory_id}`;
+                api.get(`/brand/get_active_brand?company_id=${p.company_id}&category_id=${item.category_id}&subcategory_id=${item.subcategory_id}`)
+                  .then(resBrand => {
+                    if (resBrand.data.status) {
+                      setCompanyBrands(prev => ({ ...prev, [key]: resBrand.data.data }));
+                    }
+                  });
+              }
+            });
+
             // Re-run validation against backend DB to check status
             runBackendValidation(formatted);
           }
@@ -95,29 +156,64 @@ export default function PurchaseForm() {
           subcategory_name: item.subcategory_name,
           brand_name: item.brand_name,
           price: item.price,
+          selling_price: item.selling_price || 0,
+          selling_price_per_unit: item.selling_price_per_unit || "",
           quantity: item.quantity,
           unit: item.unit,
           gst_percentage: item.gst_percentage
         }))
       });
       if (res.data.status) {
-        // Sync resolved IDs & warnings/errors back to local state
         const validated = res.data.data;
-        setItems(prev =>
-          prev.map((item, index) => {
-            const val = validated[index] || {};
-            return {
-              ...item,
-              product_id: val.product_id,
-              category_id: val.category_id,
-              subcategory_id: val.subcategory_id,
-              brand_id: val.brand_id,
-              status: val.status,
-              errors: val.errors || [],
-              warnings: val.warnings || []
-            };
-          })
-        );
+
+        // Build the resolved items list
+        const resolvedItems = currentItems.map((item, index) => {
+          const val = validated[index] || {};
+          return {
+            ...item,
+            product_id: val.product_id,
+            category_id: val.category_id || item.category_id,
+            subcategory_id: val.subcategory_id || item.subcategory_id,
+            brand_id: val.brand_id || item.brand_id,
+            status: val.status,
+            errors: val.errors || [],
+            warnings: val.warnings || []
+          };
+        });
+
+        setItems(resolvedItems);
+
+        // Prefetch subcategory options for all resolved category_ids (bypass stale closure)
+        const uniqueCatIds = [...new Set(resolvedItems.map(i => i.category_id).filter(Boolean))];
+        for (const catId of uniqueCatIds) {
+          try {
+            const subRes = await api.get(`/subcategory/get_active_subcategory?company_id=${selectedCompany}&category_id=${catId}`);
+            if (subRes.data.status) {
+              setCompanySubcategories(prev => ({ ...prev, [catId]: subRes.data.data }));
+            }
+          } catch (e) { console.error("subcategory prefetch error", e); }
+        }
+
+        // Prefetch brand options for any resolved category+subcategory combos
+        const uniqueKeys = [...new Set(
+          resolvedItems
+            .filter(i => i.category_id && i.subcategory_id)
+            .map(i => `${i.category_id}-${i.subcategory_id}`)
+        )];
+        // Use a local set to avoid duplicate fetches within this pass (bypass stale closure)
+        const fetchedKeys = new Set();
+        for (const key of uniqueKeys) {
+          if (!fetchedKeys.has(key)) {
+            fetchedKeys.add(key);
+            const [catId, subId] = key.split("-");
+            try {
+              const brandRes = await api.get(`/brand/get_active_brand?company_id=${selectedCompany}&category_id=${catId}&subcategory_id=${subId}`);
+              if (brandRes.data.status) {
+                setCompanyBrands(prev => ({ ...prev, [key]: brandRes.data.data }));
+              }
+            } catch (e) { console.error("brand prefetch error", e); }
+          }
+        }
       }
     } catch (err) {
       console.error("Backend validation error", err);
@@ -127,9 +223,9 @@ export default function PurchaseForm() {
   // Trigger Excel file template download
   const downloadTemplate = () => {
     const headers = [
-      ["Product Name", "Product Code", "Barcode", "Category", "Subcategory", "Brand", "Purchase Price", "Quantity", "Unit", "GST %"],
-      ["Sample Product A", "PRDA01", "1234567890", "Electronics", "Mobiles", "BrandX", "15000", "10", "pcs", "18"],
-      ["Sample Product B", "PRDB02", "", "Groceries", "Snacks", "BrandY", "120", "50", "box", "5"]
+      ["Product Name", "Product Code", "Barcode", "Category", "Subcategory", "Brand", "Supplier Price", "Selling Price", "Selling Price Per Unit", "Quantity", "Unit", "GST %"],
+      ["Sample Product A", "PRDA01", "1234567890", "Electronics", "Mobiles", "BrandX", "15000", "18000", "per Piece", "10", "Piece", "18"],
+      ["Sample Product B", "PRDB02", "", "Groceries", "Snacks", "BrandY", "120", "150", "per Pack", "50", "Pack", "5"]
     ];
 
     const worksheet = XLSX.utils.aoa_to_sheet(headers);
@@ -144,7 +240,7 @@ export default function PurchaseForm() {
     if (!file) return;
 
     const reader = new FileReader();
-    reader.onload = (evt) => {
+    reader.onload = async (evt) => {
       const data = new Uint8Array(evt.target.result);
       const workbook = XLSX.read(data, { type: "array" });
       const sheetName = workbook.SheetNames[0];
@@ -158,7 +254,6 @@ export default function PurchaseForm() {
 
       // Map spreadsheet columns to keys
       const parsed = json.map(row => {
-        // Find keys case-insensitively
         const findVal = (names) => {
           const key = Object.keys(row).find(k => names.includes(k.trim().toLowerCase()));
           return key ? row[key] : "";
@@ -171,9 +266,11 @@ export default function PurchaseForm() {
           category_name: String(findVal(["category", "category name", "category_name"]) || ""),
           subcategory_name: String(findVal(["subcategory", "sub category", "subcategory_name"]) || ""),
           brand_name: String(findVal(["brand", "brand name", "brand_name"]) || ""),
-          price: parseFloat(findVal(["purchase price", "price", "rate", "cost"]) || 0),
+          price: parseFloat(findVal(["supplier price", "purchase price", "price", "rate", "cost", "cost price"]) || 0),
+          selling_price: parseFloat(findVal(["selling price", "selling_price", "sell price"]) || 0),
+          selling_price_per_unit: String(findVal(["selling price per unit", "selling_price_per_unit", "sell price per unit"]) || ""),
           quantity: parseInt(findVal(["quantity", "qty", "stock"]) || 0),
-          unit: String(findVal(["unit", "uom"]) || "pcs"),
+          unit: String(findVal(["unit", "uom"]) || "Piece"),
           gst_percentage: parseFloat(findVal(["gst %", "gst", "gst_percentage"]) || 0),
           status: "pending",
           errors: [],
@@ -182,7 +279,76 @@ export default function PurchaseForm() {
       });
 
       setItems(parsed);
-      runBackendValidation(parsed);
+      // Run backend validation to resolve IDs, then prefetch dropdowns
+      try {
+        const res = await api.post("/purchase/validate_items", {
+          company_id: selectedCompany,
+          items: parsed.map(item => ({
+            product_name: item.product_name,
+            product_code: item.product_code,
+            barcode: item.barcode,
+            category_name: item.category_name,
+            subcategory_name: item.subcategory_name,
+            brand_name: item.brand_name,
+            price: item.price,
+            selling_price: item.selling_price || 0,
+            selling_price_per_unit: item.selling_price_per_unit || "",
+            quantity: item.quantity,
+            unit: item.unit,
+            gst_percentage: item.gst_percentage
+          }))
+        });
+        if (res.data.status) {
+          const validated = res.data.data;
+          const resolvedItems = parsed.map((item, index) => {
+            const val = validated[index] || {};
+            return {
+              ...item,
+              product_id: val.product_id,
+              category_id: val.category_id || item.category_id,
+              subcategory_id: val.subcategory_id || item.subcategory_id,
+              brand_id: val.brand_id || item.brand_id,
+              status: val.status,
+              errors: val.errors || [],
+              warnings: val.warnings || []
+            };
+          });
+          setItems(resolvedItems);
+
+          // Prefetch subcategories for all unique category IDs
+          const uniqueCatIds = [...new Set(resolvedItems.map(i => i.category_id).filter(Boolean))];
+          for (const catId of uniqueCatIds) {
+            if (!companySubcategories[catId]) {
+              try {
+                const subRes = await api.get(`/subcategory/get_active_subcategory?company_id=${selectedCompany}&category_id=${catId}`);
+                if (subRes.data.status) {
+                  setCompanySubcategories(prev => ({ ...prev, [catId]: subRes.data.data }));
+                }
+              } catch (e) { console.error(e); }
+            }
+          }
+
+          // Prefetch brands for all unique category+subcategory combos
+          const uniqueKeys = [...new Set(
+            resolvedItems
+              .filter(i => i.category_id && i.subcategory_id)
+              .map(i => `${i.category_id}-${i.subcategory_id}`)
+          )];
+          for (const key of uniqueKeys) {
+            if (!companyBrands[key]) {
+              const [catId, subId] = key.split("-");
+              try {
+                const brandRes = await api.get(`/brand/get_active_brand?company_id=${selectedCompany}&category_id=${catId}&subcategory_id=${subId}`);
+                if (brandRes.data.status) {
+                  setCompanyBrands(prev => ({ ...prev, [key]: brandRes.data.data }));
+                }
+              } catch (e) { console.error(e); }
+            }
+          }
+        }
+      } catch (err) {
+        console.error("Excel validation error", err);
+      }
     };
     reader.readAsArrayBuffer(file);
     // Reset file input value
@@ -198,9 +364,14 @@ export default function PurchaseForm() {
       category_name: "",
       subcategory_name: "",
       brand_name: "",
+      category_id: "",
+      subcategory_id: "",
+      brand_id: "",
       price: 0,
+      selling_price: 0,
+      selling_price_per_unit: "",
       quantity: 1,
-      unit: "pcs",
+      unit: "Piece",
       gst_percentage: 0,
       status: "pending",
       errors: [],
@@ -224,11 +395,143 @@ export default function PurchaseForm() {
     return () => clearTimeout(timer);
   };
 
+  // Handle Category Select
+  const handleCategoryChange = async (index, categoryId) => {
+    const cat = categories.find(c => Number(c.id) === Number(categoryId));
+    const updated = [...items];
+    updated[index] = {
+      ...updated[index],
+      category_id: categoryId,
+      category_name: cat ? cat.name : "",
+      subcategory_id: "",
+      subcategory_name: "",
+      brand_id: "",
+      brand_name: "",
+      status: "pending"
+    };
+    setItems(updated);
+
+    if (categoryId && !companySubcategories[categoryId]) {
+      try {
+        const res = await api.get(`/subcategory/get_active_subcategory?company_id=${selectedCompany}&category_id=${categoryId}`);
+        if (res.data.status) {
+          setCompanySubcategories(prev => ({ ...prev, [categoryId]: res.data.data }));
+        }
+      } catch (err) {
+        console.error(err);
+      }
+    }
+    runBackendValidation(updated);
+  };
+
+  // Handle Subcategory Select
+  const handleSubcategoryChange = async (index, subcategoryId) => {
+    const categoryId = items[index].category_id;
+    const subcats = companySubcategories[categoryId] || [];
+    const subcat = subcats.find(s => Number(s.id) === Number(subcategoryId));
+
+    const updated = [...items];
+    updated[index] = {
+      ...updated[index],
+      subcategory_id: subcategoryId,
+      subcategory_name: subcat ? subcat.name : "",
+      brand_id: "",
+      brand_name: "",
+      status: "pending"
+    };
+    setItems(updated);
+
+    const cacheKey = `${categoryId}-${subcategoryId}`;
+    if (categoryId && subcategoryId && !companyBrands[cacheKey]) {
+      try {
+        const res = await api.get(`/brand/get_active_brand?company_id=${selectedCompany}&category_id=${categoryId}&subcategory_id=${subcategoryId}`);
+        if (res.data.status) {
+          setCompanyBrands(prev => ({ ...prev, [cacheKey]: res.data.data }));
+        }
+      } catch (err) {
+        console.error(err);
+      }
+    }
+    runBackendValidation(updated);
+  };
+
+  // Handle Brand Select
+  const handleBrandChange = (index, brandId) => {
+    const categoryId = items[index].category_id;
+    const subcategoryId = items[index].subcategory_id;
+    const cacheKey = `${categoryId}-${subcategoryId}`;
+    const brandsList = companyBrands[cacheKey] || [];
+    const brand = brandsList.find(b => Number(b.id) === Number(brandId));
+
+    const updated = [...items];
+    updated[index] = {
+      ...updated[index],
+      brand_id: brandId,
+      brand_name: brand ? brand.name : "",
+      status: "pending"
+    };
+    setItems(updated);
+    runBackendValidation(updated);
+  };
+
   // Remove row
   const deleteRow = (index) => {
     const updated = items.filter((_, i) => i !== index);
     setItems(updated);
     runBackendValidation(updated);
+  };
+
+  // Lookup product by code and auto-fill row fields
+  const fetchProductByCode = async (index, code) => {
+    if (!code || !selectedCompany) return;
+    try {
+      const res = await api.get(`/product/get_by_code?company_id=${selectedCompany}&product_code=${encodeURIComponent(code)}`);
+      if (res.data.status) {
+        const p = res.data.data;
+        const updated = [...items];
+        updated[index] = {
+          ...updated[index],
+          product_name: p.product_name || updated[index].product_name,
+          product_code: p.product_code || code,
+          barcode: p.barcode || updated[index].barcode,
+          category_id: p.category_id || "",
+          category_name: p.category_name || "",
+          subcategory_id: p.subcategory_id || "",
+          subcategory_name: p.subcategory_name || "",
+          brand_id: p.brand_id || "",
+          brand_name: p.brand_name || "",
+          price: p.price || updated[index].price,
+          unit: p.unit || updated[index].unit,
+          gst_percentage: p.gst_percentage || updated[index].gst_percentage,
+          product_id: p.id,
+          status: "valid",
+          errors: [],
+          warnings: []
+        };
+        setItems(updated);
+
+        // Pre-fetch subcategory + brand dropdowns for this product's category/subcategory
+        if (p.category_id) {
+          if (!companySubcategories[p.category_id]) {
+            const subRes = await api.get(`/subcategory/get_active_subcategory?company_id=${selectedCompany}&category_id=${p.category_id}`);
+            if (subRes.data.status) {
+              setCompanySubcategories(prev => ({ ...prev, [p.category_id]: subRes.data.data }));
+            }
+          }
+          if (p.subcategory_id) {
+            const cacheKey = `${p.category_id}-${p.subcategory_id}`;
+            if (!companyBrands[cacheKey]) {
+              const brandRes = await api.get(`/brand/get_active_brand?company_id=${selectedCompany}&category_id=${p.category_id}&subcategory_id=${p.subcategory_id}`);
+              if (brandRes.data.status) {
+                setCompanyBrands(prev => ({ ...prev, [cacheKey]: brandRes.data.data }));
+              }
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.error("Product code lookup error", err);
+    }
   };
 
   // Calculation totals
@@ -238,6 +541,10 @@ export default function PurchaseForm() {
 
   // Actions
   const handleSaveDraft = async () => {
+    if (!selectedCompany) {
+      alert("Please select a company!");
+      return;
+    }
     if (!selectedSupplier) {
       alert("Please select a supplier!");
       return;
@@ -251,7 +558,24 @@ export default function PurchaseForm() {
         purchase_no: purchaseNo,
         purchase_date: purchaseDate,
         paid_amount: paidAmount,
-        items
+        items: items.map(item => ({
+          product_id: item.product_id,
+          product_name: item.product_name,
+          product_code: item.product_code,
+          barcode: item.barcode,
+          category_id: item.category_id,
+          category_name: item.category_name,
+          subcategory_id: item.subcategory_id,
+          subcategory_name: item.subcategory_name,
+          brand_id: item.brand_id,
+          brand_name: item.brand_name,
+          price: item.price,
+          selling_price: item.selling_price || 0,
+          selling_price_per_unit: item.selling_price_per_unit || "",
+          quantity: item.quantity,
+          unit: item.unit,
+          gst_percentage: item.gst_percentage
+        }))
       });
       if (res.data.status) {
         alert(res.data.message);
@@ -268,6 +592,10 @@ export default function PurchaseForm() {
   };
 
   const handleSubmitPurchase = async () => {
+    if (!selectedCompany) {
+      alert("Please select a company!");
+      return;
+    }
     if (!selectedSupplier) {
       alert("Please select a supplier!");
       return;
@@ -294,7 +622,24 @@ export default function PurchaseForm() {
         purchase_no: purchaseNo,
         purchase_date: purchaseDate,
         paid_amount: paidAmount,
-        items
+        items: items.map(item => ({
+          product_id: item.product_id,
+          product_name: item.product_name,
+          product_code: item.product_code,
+          barcode: item.barcode,
+          category_id: item.category_id,
+          category_name: item.category_name,
+          subcategory_id: item.subcategory_id,
+          subcategory_name: item.subcategory_name,
+          brand_id: item.brand_id,
+          brand_name: item.brand_name,
+          price: item.price,
+          selling_price: item.selling_price || 0,
+          selling_price_per_unit: item.selling_price_per_unit || "",
+          quantity: item.quantity,
+          unit: item.unit,
+          gst_percentage: item.gst_percentage
+        }))
       });
       if (res.data.status) {
         alert(res.data.message);
@@ -312,6 +657,57 @@ export default function PurchaseForm() {
 
   return (
     <div style={{ padding: "30px", background: "#f8fafc", minHeight: "100vh" }}>
+      <style>{`
+        .purchase-form-grid {
+          display: grid;
+          grid-template-columns: 1fr 340px;
+          gap: 25px;
+          align-items: start;
+        }
+        @media (max-width: 1100px) {
+          .purchase-form-grid {
+            grid-template-columns: 1fr;
+          }
+        }
+        .purchase-form-select, .purchase-form-input {
+          width: 100%;
+          padding: 10px;
+          border-radius: 10px;
+          border: 1.5px solid #e2e8f0;
+          outline: none;
+          font-size: 14px;
+          font-weight: 500;
+          background: #ffffff;
+          box-sizing: border-box;
+          transition: all 0.2s;
+        }
+        .purchase-form-select:focus, .purchase-form-input:focus {
+          border-color: #3b82f6;
+          box-shadow: 0 0 0 3px rgba(59,130,246,0.1);
+        }
+        .purchase-form-select:disabled, .purchase-form-input:disabled {
+          background: #f1f5f9;
+          color: #64748b;
+          cursor: not-allowed;
+        }
+        .scroll-container::-webkit-scrollbar {
+          height: 10px;
+          display: block;
+        }
+        .scroll-container::-webkit-scrollbar-track {
+          background: #f8fafc;
+          border-radius: 6px;
+        }
+        .scroll-container::-webkit-scrollbar-thumb {
+          background: #cbd5e1;
+          border-radius: 6px;
+          border: 2px solid #f8fafc;
+        }
+        .scroll-container::-webkit-scrollbar-thumb:hover {
+          background: #94a3b8;
+        }
+      `}</style>
+
       {/* Header */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "25px" }}>
         <div style={{ display: "flex", alignItems: "center", gap: "15px" }}>
@@ -346,13 +742,13 @@ export default function PurchaseForm() {
       {loading ? (
         <div style={{ textAlign: "center", padding: "60px", color: "#64748b" }}>Loading purchase record...</div>
       ) : (
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 340px", gap: "25px", alignItems: "start" }}>
+        <div className="purchase-form-grid">
           {/* Main Workspace (Import & Grid Table) */}
-          <div style={{ display: "flex", flexDirection: "column", gap: "25px" }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: "25px", minWidth: 0 }}>
             
             {/* Import Controls */}
             {!isLocked && (
-              <div style={{ background: "#ffffff", padding: "20px", borderRadius: "20px", border: "1px solid #e2e8f0", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div style={{ background: "#ffffff", padding: "20px", borderRadius: "20px", border: "1px solid #e2e8f0", display: "flex", flexWrap: "wrap", gap: "15px", justifyContent: "space-between", alignItems: "center" }}>
                 <div>
                   <h3 style={{ fontSize: "16px", fontWeight: "700", color: "#1e293b", margin: 0 }}>Import Invoice Items</h3>
                   <p style={{ fontSize: "13px", color: "#64748b", marginTop: "3px" }}>Upload supplier excel directly to validate and check catalog matches</p>
@@ -380,18 +776,20 @@ export default function PurchaseForm() {
                     style={{
                       padding: "8px 16px",
                       borderRadius: "10px",
-                      background: "#2563eb",
+                      background: selectedCompany ? "#2563eb" : "#94a3b8",
                       color: "#ffffff",
                       fontSize: "13px",
                       fontWeight: "600",
-                      cursor: "pointer",
+                      cursor: selectedCompany ? "pointer" : "not-allowed",
                       display: "flex",
                       alignItems: "center",
                       gap: "6px"
                     }}
                   >
                     <UploadCloud size={16} /> Upload Excel
-                    <input type="file" accept=".xlsx, .xls" onChange={handleExcelUpload} style={{ display: "none" }} />
+                    {selectedCompany && (
+                      <input type="file" accept=".xlsx, .xls" onChange={handleExcelUpload} style={{ display: "none" }} />
+                    )}
                   </label>
                 </div>
               </div>
@@ -404,15 +802,16 @@ export default function PurchaseForm() {
                 {!isLocked && (
                   <button
                     onClick={addManualRow}
+                    disabled={!selectedCompany}
                     style={{
                       padding: "6px 12px",
                       borderRadius: "8px",
-                      background: "#ffffff",
-                      color: "#2563eb",
-                      border: "1.5px solid #dbeafe",
+                      background: selectedCompany ? "#ffffff" : "#f1f5f9",
+                      color: selectedCompany ? "#2563eb" : "#94a3b8",
+                      border: selectedCompany ? "1.5px solid #dbeafe" : "1.5px solid #e2e8f0",
                       fontSize: "12.5px",
                       fontWeight: "600",
-                      cursor: "pointer",
+                      cursor: selectedCompany ? "pointer" : "not-allowed",
                       display: "flex",
                       alignItems: "center",
                       gap: "5px"
@@ -422,29 +821,31 @@ export default function PurchaseForm() {
                   </button>
                 )}
               </div>
-              <div style={{ overflowX: "auto" }}>
-                <table style={{ width: "100%", borderCollapse: "collapse", minWidth: "1000px" }}>
+              <div className="scroll-container" style={{ overflowX: "auto", paddingBottom: "10px" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", minWidth: "1600px" }}>
                   <thead>
                     <tr style={{ background: "#f8fafc", borderBottom: "1px solid #e2e8f0" }}>
-                      <th style={{ padding: "12px 15px", fontSize: "12px", fontWeight: "700", color: "#64748b", width: "50px" }}>Status</th>
-                      <th style={{ padding: "12px 15px", fontSize: "12px", fontWeight: "700", color: "#64748b" }}>Product Name *</th>
-                      <th style={{ padding: "12px 15px", fontSize: "12px", fontWeight: "700", color: "#64748b" }}>Product Code</th>
-                      <th style={{ padding: "12px 15px", fontSize: "12px", fontWeight: "700", color: "#64748b" }}>Barcode</th>
-                      <th style={{ padding: "12px 15px", fontSize: "12px", fontWeight: "700", color: "#64748b" }}>Category</th>
-                      <th style={{ padding: "12px 15px", fontSize: "12px", fontWeight: "700", color: "#64748b" }}>Subcategory</th>
-                      <th style={{ padding: "12px 15px", fontSize: "12px", fontWeight: "700", color: "#64748b" }}>Brand</th>
-                      <th style={{ padding: "12px 15px", fontSize: "12px", fontWeight: "700", color: "#64748b", width: "100px" }}>Cost Price</th>
-                      <th style={{ padding: "12px 15px", fontSize: "12px", fontWeight: "700", color: "#64748b", width: "80px" }}>Qty</th>
-                      <th style={{ padding: "12px 15px", fontSize: "12px", fontWeight: "700", color: "#64748b", width: "80px" }}>Unit</th>
-                      <th style={{ padding: "12px 15px", fontSize: "12px", fontWeight: "700", color: "#64748b", width: "85px" }}>GST %</th>
-                      {!isLocked && <th style={{ padding: "12px 15px", width: "50px" }}></th>}
+                      <th style={{ padding: "12px 10px", fontSize: "12px", fontWeight: "700", color: "#64748b", width: "40px" }}>Status</th>
+                      <th style={{ padding: "12px 10px", fontSize: "12px", fontWeight: "700", color: "#64748b", width: "150px" }}>Product Name *</th>
+                      <th style={{ padding: "12px 10px", fontSize: "12px", fontWeight: "700", color: "#64748b", width: "100px" }}>Product Code</th>
+                      <th style={{ padding: "12px 10px", fontSize: "12px", fontWeight: "700", color: "#64748b", width: "100px" }}>Barcode</th>
+                      <th style={{ padding: "12px 10px", fontSize: "12px", fontWeight: "700", color: "#64748b", width: "130px" }}>Category</th>
+                      <th style={{ padding: "12px 10px", fontSize: "12px", fontWeight: "700", color: "#64748b", width: "130px" }}>Subcategory</th>
+                      <th style={{ padding: "12px 10px", fontSize: "12px", fontWeight: "700", color: "#64748b", width: "120px" }}>Brand</th>
+                      <th style={{ padding: "12px 10px", fontSize: "12px", fontWeight: "700", color: "#64748b", width: "90px" }}>Supplier Price</th>
+                      <th style={{ padding: "12px 10px", fontSize: "12px", fontWeight: "700", color: "#64748b", width: "90px" }}>Selling Price</th>
+                      <th style={{ padding: "12px 10px", fontSize: "12px", fontWeight: "700", color: "#64748b", width: "100px" }}>Selling Price Unit</th>
+                      <th style={{ padding: "12px 10px", fontSize: "12px", fontWeight: "700", color: "#64748b", width: "60px" }}>Qty</th>
+                      <th style={{ padding: "12px 10px", fontSize: "12px", fontWeight: "700", color: "#64748b", width: "90px" }}>Unit</th>
+                      <th style={{ padding: "12px 10px", fontSize: "12px", fontWeight: "700", color: "#64748b", width: "70px" }}>GST %</th>
+                      {!isLocked && <th style={{ padding: "12px 10px", width: "40px" }}></th>}
                     </tr>
                   </thead>
                   <tbody>
                     {items.length === 0 ? (
                       <tr>
-                        <td colSpan={isLocked ? 11 : 12} style={{ padding: "40px", textAlign: "center", color: "#94a3b8" }}>
-                          No items added. Import excel or add manual rows to start.
+                        <td colSpan={isLocked ? 13 : 14} style={{ padding: "40px", textAlign: "center", color: "#94a3b8" }}>
+                          No items added. Select Company first, then Import excel or add manual rows to start.
                         </td>
                       </tr>
                     ) : (
@@ -460,12 +861,12 @@ export default function PurchaseForm() {
                         return (
                           <tr key={index} style={{ borderBottom: "1px solid #f1f5f9" }}>
                             {/* Status */}
-                            <td style={{ padding: "12px 15px", textAlign: "center" }}>
+                            <td style={{ padding: "8px 10px", textAlign: "center" }}>
                               <div
                                 title={[...(item.errors || []), ...(item.warnings || [])].join("\n")}
                                 style={{
-                                  width: "24px",
-                                  height: "24px",
+                                  width: "22px",
+                                  height: "22px",
                                   borderRadius: "50%",
                                   backgroundColor: statusStyle.bg,
                                   color: statusStyle.color,
@@ -473,7 +874,7 @@ export default function PurchaseForm() {
                                   alignItems: "center",
                                   justifyContent: "center",
                                   fontWeight: "800",
-                                  fontSize: "12px",
+                                  fontSize: "11px",
                                   cursor: "pointer"
                                 }}
                               >
@@ -481,7 +882,7 @@ export default function PurchaseForm() {
                               </div>
                             </td>
                             {/* Product Name */}
-                            <td style={{ padding: "8px 6px" }}>
+                            <td style={{ padding: "6px 5px" }}>
                               <input
                                 type="text"
                                 value={item.product_name}
@@ -492,103 +893,153 @@ export default function PurchaseForm() {
                                   padding: "6px 8px",
                                   border: item.product_name ? "1px solid #e2e8f0" : "1.5px solid #ef4444",
                                   borderRadius: "6px",
-                                  fontSize: "13px"
+                                  fontSize: "13px",
+                                  boxSizing: "border-box"
                                 }}
                               />
                             </td>
                             {/* Code */}
-                            <td style={{ padding: "8px 6px" }}>
+                            <td style={{ padding: "6px 5px" }}>
                               <input
                                 type="text"
                                 value={item.product_code}
                                 disabled={isLocked}
                                 onChange={(e) => updateRowField(index, "product_code", e.target.value)}
-                                style={{ width: "100%", padding: "6px 8px", border: "1px solid #e2e8f0", borderRadius: "6px", fontSize: "13px" }}
+                                onBlur={(e) => fetchProductByCode(index, e.target.value.trim())}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter") {
+                                    e.preventDefault();
+                                    fetchProductByCode(index, e.target.value.trim());
+                                  }
+                                }}
+                                placeholder="Code + Enter"
+                                title="Enter product code and press Enter or Tab to auto-fill product details"
+                                style={{ width: "100%", padding: "6px 8px", border: "1px solid #e2e8f0", borderRadius: "6px", fontSize: "13px", boxSizing: "border-box" }}
                               />
                             </td>
                             {/* Barcode */}
-                            <td style={{ padding: "8px 6px" }}>
+                            <td style={{ padding: "6px 5px" }}>
                               <input
                                 type="text"
                                 value={item.barcode}
                                 disabled={isLocked}
                                 onChange={(e) => updateRowField(index, "barcode", e.target.value)}
-                                style={{ width: "100%", padding: "6px 8px", border: "1px solid #e2e8f0", borderRadius: "6px", fontSize: "13px" }}
+                                style={{ width: "100%", padding: "6px 8px", border: "1px solid #e2e8f0", borderRadius: "6px", fontSize: "13px", boxSizing: "border-box" }}
                               />
                             </td>
                             {/* Category */}
-                            <td style={{ padding: "8px 6px" }}>
-                              <input
-                                type="text"
-                                value={item.category_name}
-                                disabled={isLocked}
-                                onChange={(e) => updateRowField(index, "category_name", e.target.value)}
-                                style={{ width: "100%", padding: "6px 8px", border: "1px solid #e2e8f0", borderRadius: "6px", fontSize: "13px" }}
-                              />
+                            <td style={{ padding: "6px 5px" }}>
+                              <select
+                                value={item.category_id || ""}
+                                disabled={isLocked || !selectedCompany}
+                                onChange={(e) => handleCategoryChange(index, e.target.value)}
+                                style={{ width: "100%", padding: "6px 4px", border: "1px solid #e2e8f0", borderRadius: "6px", fontSize: "12.5px", background: "#ffffff", boxSizing: "border-box" }}
+                              >
+                                <option value="">Select Category</option>
+                                {categories.map(c => (
+                                  <option key={c.id} value={c.id}>{c.name}</option>
+                                ))}
+                              </select>
                             </td>
                             {/* Subcategory */}
-                            <td style={{ padding: "8px 6px" }}>
-                              <input
-                                type="text"
-                                value={item.subcategory_name}
-                                disabled={isLocked}
-                                onChange={(e) => updateRowField(index, "subcategory_name", e.target.value)}
-                                style={{ width: "100%", padding: "6px 8px", border: "1px solid #e2e8f0", borderRadius: "6px", fontSize: "13px" }}
-                              />
+                            <td style={{ padding: "6px 5px" }}>
+                              <select
+                                value={item.subcategory_id || ""}
+                                disabled={isLocked || !item.category_id}
+                                onChange={(e) => handleSubcategoryChange(index, e.target.value)}
+                                style={{ width: "100%", padding: "6px 4px", border: "1px solid #e2e8f0", borderRadius: "6px", fontSize: "12.5px", background: "#ffffff", boxSizing: "border-box" }}
+                              >
+                                <option value="">Select Subcategory</option>
+                                {(companySubcategories[item.category_id] || []).map(s => (
+                                  <option key={s.id} value={s.id}>{s.name}</option>
+                                ))}
+                              </select>
                             </td>
                             {/* Brand */}
-                            <td style={{ padding: "8px 6px" }}>
-                              <input
-                                type="text"
-                                value={item.brand_name}
-                                disabled={isLocked}
-                                onChange={(e) => updateRowField(index, "brand_name", e.target.value)}
-                                style={{ width: "100%", padding: "6px 8px", border: "1px solid #e2e8f0", borderRadius: "6px", fontSize: "13px" }}
-                              />
+                            <td style={{ padding: "6px 5px" }}>
+                              <select
+                                value={item.brand_id || ""}
+                                disabled={isLocked || !item.subcategory_id}
+                                onChange={(e) => handleBrandChange(index, e.target.value)}
+                                style={{ width: "100%", padding: "6px 4px", border: "1px solid #e2e8f0", borderRadius: "6px", fontSize: "12.5px", background: "#ffffff", boxSizing: "border-box" }}
+                              >
+                                <option value="">Select Brand</option>
+                                {(companyBrands[`${item.category_id}-${item.subcategory_id}`] || []).map(b => (
+                                  <option key={b.id} value={b.id}>{b.name}</option>
+                                ))}
+                              </select>
                             </td>
                             {/* Price */}
-                            <td style={{ padding: "8px 6px" }}>
+                            <td style={{ padding: "6px 5px" }}>
                               <input
                                 type="number"
                                 value={item.price}
                                 disabled={isLocked}
                                 onChange={(e) => updateRowField(index, "price", parseFloat(e.target.value) || 0)}
-                                style={{ width: "100%", padding: "6px 8px", border: "1px solid #e2e8f0", borderRadius: "6px", fontSize: "13px" }}
+                                style={{ width: "100%", padding: "6px 8px", border: "1px solid #e2e8f0", borderRadius: "6px", fontSize: "13px", boxSizing: "border-box" }}
                               />
                             </td>
+                            {/* Selling Price */}
+                            <td style={{ padding: "6px 5px" }}>
+                              <input
+                                type="number"
+                                value={item.selling_price || 0}
+                                disabled={isLocked}
+                                onChange={(e) => updateRowField(index, "selling_price", parseFloat(e.target.value) || 0)}
+                                style={{ width: "100%", padding: "6px 8px", border: "1px solid #e2e8f0", borderRadius: "6px", fontSize: "13px", boxSizing: "border-box" }}
+                              />
+                            </td>
+                            {/* Selling Price per Unit */}
+                            <td style={{ padding: "6px 5px" }}>
+                              <select
+                                value={item.selling_price_per_unit || ""}
+                                disabled={isLocked}
+                                onChange={(e) => updateRowField(index, "selling_price_per_unit", e.target.value)}
+                                style={{ width: "100%", padding: "6px 4px", border: "1px solid #e2e8f0", borderRadius: "6px", fontSize: "12.5px", background: "#ffffff", boxSizing: "border-box" }}
+                              >
+                                <option value="">Select Unit</option>
+                                {unitOptions.map(opt => (
+                                  <option key={opt} value={`per ${opt}`}>per {opt}</option>
+                                ))}
+                              </select>
+                            </td>
                             {/* Qty */}
-                            <td style={{ padding: "8px 6px" }}>
+                            <td style={{ padding: "6px 5px" }}>
                               <input
                                 type="number"
                                 value={item.quantity}
                                 disabled={isLocked}
                                 onChange={(e) => updateRowField(index, "quantity", parseInt(e.target.value) || 0)}
-                                style={{ width: "100%", padding: "6px 8px", border: "1px solid #e2e8f0", borderRadius: "6px", fontSize: "13px" }}
+                                style={{ width: "100%", padding: "6px 8px", border: "1px solid #e2e8f0", borderRadius: "6px", fontSize: "13px", boxSizing: "border-box" }}
                               />
                             </td>
                             {/* Unit */}
-                            <td style={{ padding: "8px 6px" }}>
-                              <input
-                                type="text"
-                                value={item.unit}
+                            <td style={{ padding: "6px 5px" }}>
+                              <select
+                                value={item.unit || ""}
                                 disabled={isLocked}
                                 onChange={(e) => updateRowField(index, "unit", e.target.value)}
-                                style={{ width: "100%", padding: "6px 8px", border: "1px solid #e2e8f0", borderRadius: "6px", fontSize: "13px" }}
-                              />
+                                style={{ width: "100%", padding: "6px 4px", border: "1px solid #e2e8f0", borderRadius: "6px", fontSize: "12.5px", background: "#ffffff", boxSizing: "border-box" }}
+                              >
+                                <option value="">Select Unit</option>
+                                {unitOptions.map(opt => (
+                                  <option key={opt} value={opt}>{opt}</option>
+                                ))}
+                              </select>
                             </td>
                             {/* GST */}
-                            <td style={{ padding: "8px 6px" }}>
+                            <td style={{ padding: "6px 5px" }}>
                               <input
                                 type="number"
                                 value={item.gst_percentage}
                                 disabled={isLocked}
                                 onChange={(e) => updateRowField(index, "gst_percentage", parseFloat(e.target.value) || 0)}
-                                style={{ width: "100%", padding: "6px 8px", border: "1px solid #e2e8f0", borderRadius: "6px", fontSize: "13px" }}
+                                style={{ width: "100%", padding: "6px 8px", border: "1px solid #e2e8f0", borderRadius: "6px", fontSize: "13px", boxSizing: "border-box" }}
                               />
                             </td>
                             {/* Action delete */}
                             {!isLocked && (
-                              <td style={{ padding: "12px 15px", textAlign: "center" }}>
+                              <td style={{ padding: "8px 10px", textAlign: "center" }}>
                                 <button
                                   onClick={() => deleteRow(index)}
                                   style={{
@@ -621,30 +1072,49 @@ export default function PurchaseForm() {
               <h3 style={{ fontSize: "15px", fontWeight: "700", color: "#1e293b", marginBottom: "15px" }}>Invoice Parameters</h3>
 
               <div style={{ display: "flex", flexDirection: "column", gap: "15px" }}>
+                
+                {/* Company Select */}
+                <div style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
+                  <label style={{ fontSize: "12px", fontWeight: "700", color: "#64748b", textTransform: "uppercase" }}>Company *</label>
+                  <select
+                    value={selectedCompany}
+                    disabled={isLocked}
+                    onChange={(e) => {
+                      const compId = e.target.value;
+                      setSelectedCompany(compId);
+                      localStorage.setItem("selected_company_id", compId);
+                      setSelectedSupplier("");
+                      setItems([]);
+                      setCategories([]);
+                      setCompanySubcategories({});
+                      setCompanyBrands({});
+                    }}
+                    className="purchase-form-select"
+                  >
+                    <option value="">Select Company</option>
+                    {companies.map(c => (
+                      <option key={c.id} value={c.id}>{c.company_name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Supplier Select */}
                 <div style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
                   <label style={{ fontSize: "12px", fontWeight: "700", color: "#64748b", textTransform: "uppercase" }}>Supplier *</label>
                   <select
                     value={selectedSupplier}
-                    disabled={isLocked}
+                    disabled={isLocked || !selectedCompany}
                     onChange={(e) => setSelectedSupplier(e.target.value)}
-                    style={{
-                      width: "100%",
-                      padding: "10px",
-                      borderRadius: "10px",
-                      border: "1.5px solid #e2e8f0",
-                      outline: "none",
-                      fontSize: "14px",
-                      fontWeight: "500",
-                      background: isLocked ? "#f1f5f9" : "#ffffff"
-                    }}
+                    className="purchase-form-select"
                   >
-                    <option value="">Select Supplier</option>
+                    <option value="">{selectedCompany ? "Select Supplier" : "Select Company First"}</option>
                     {suppliers.map(s => (
                       <option key={s.id} value={s.id}>{s.supplier_name}</option>
                     ))}
                   </select>
                 </div>
 
+                {/* Bill No */}
                 <div style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
                   <label style={{ fontSize: "12px", fontWeight: "700", color: "#64748b", textTransform: "uppercase" }}>Bill / Invoice No</label>
                   <input
@@ -653,17 +1123,11 @@ export default function PurchaseForm() {
                     disabled={isLocked}
                     onChange={(e) => setPurchaseNo(e.target.value)}
                     placeholder="Enter Invoice Bill No"
-                    style={{
-                      width: "100%",
-                      padding: "10px",
-                      borderRadius: "10px",
-                      border: "1.5px solid #e2e8f0",
-                      fontSize: "14px",
-                      background: isLocked ? "#f1f5f9" : "#ffffff"
-                    }}
+                    className="purchase-form-input"
                   />
                 </div>
 
+                {/* Date */}
                 <div style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
                   <label style={{ fontSize: "12px", fontWeight: "700", color: "#64748b", textTransform: "uppercase" }}>Purchase Date</label>
                   <input
@@ -671,14 +1135,7 @@ export default function PurchaseForm() {
                     value={purchaseDate}
                     disabled={isLocked}
                     onChange={(e) => setPurchaseDate(e.target.value)}
-                    style={{
-                      width: "100%",
-                      padding: "10px",
-                      borderRadius: "10px",
-                      border: "1.5px solid #e2e8f0",
-                      fontSize: "14px",
-                      background: isLocked ? "#f1f5f9" : "#ffffff"
-                    }}
+                    className="purchase-form-input"
                   />
                 </div>
               </div>
@@ -715,13 +1172,7 @@ export default function PurchaseForm() {
                     type="number"
                     value={paidAmount}
                     onChange={(e) => setPaidAmount(parseFloat(e.target.value) || 0)}
-                    style={{
-                      width: "100%",
-                      padding: "8px 12px",
-                      borderRadius: "8px",
-                      border: "1.5px solid #e2e8f0",
-                      fontSize: "14px"
-                    }}
+                    className="purchase-form-input"
                   />
                 </div>
               )}

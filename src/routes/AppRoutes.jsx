@@ -61,7 +61,7 @@ import PurchaseGSTReport from "../pages/purchase/PurchaseGSTReport";
 
 export default function AppRoutes() {
   return (
-    <BrowserRouter basename="/bill">
+    <BrowserRouter>
       <Routes>
 
           {/* 🔓 Public */}

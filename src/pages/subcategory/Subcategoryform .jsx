@@ -180,7 +180,7 @@ export default function SubcategoryForm() {
       });
       if (res.data.status) {
         show("success", "Subcategory added!", `"${name.trim()}" has been created.`);
-        setTimeout(() => navigate("/subcategory"), 2000);
+        setTimeout(() => navigate("/category"), 2000);
       } else {
         show("error", "Failed", res.data.message || "Something went wrong.");
       }
@@ -587,7 +587,7 @@ export default function SubcategoryForm() {
                 : <>💾 Save Subcategory</>
               }
             </button>
-            <button className="sbf-btn-cancel" onClick={() => navigate("/subcategory")}>
+            <button className="sbf-btn-cancel" onClick={() => navigate("/category")}>
               Cancel
             </button>
           </div>

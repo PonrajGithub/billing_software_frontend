@@ -536,7 +536,7 @@ const handleCompanyChange = async(e) => {
                 <th>Product</th>
                 <th className="center">Supplier</th>
                 <th className="center">HSN Code</th>
-                <th className="center">Price</th>
+                <th className="center">Selling Price</th>
                 <th className="center">Stock</th>
                 <th className="center">GST</th>
                 <th className="center">Barcode</th>
@@ -608,11 +608,9 @@ const handleCompanyChange = async(e) => {
                       </td>
 
                       <td className="center">
-
-                        <span className="pl-price">
-                          ₹{p.price}
+                        <span className="pl-price" style={{ color: "#16a34a" }}>
+                          ₹{Number(p.price || 0).toFixed(2)}{p.unit ? ` / ${p.unit}` : ""}
                         </span>
-
                       </td>
 
                       <td className="center">

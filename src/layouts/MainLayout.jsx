@@ -63,8 +63,7 @@ export default function MainLayout() {
       ? [
           { name: "Dashboard", path: "/dashboard", icon: <LayoutDashboard size={20} /> },
           { name: "Company", path: "/company", icon: <Building2 size={20} /> },
-          { name: "Category", path: "/category", icon: <Package size={20} /> },
-          { name: "Subcategory", path: "/subcategory", icon: <Boxes size={20} /> },
+          { name: "Category & Subcategory", path: "/category", icon: <Package size={20} /> },
           { name: "Brand", path: "/brand", icon: <Tags size={20} /> },
           { name: "supplier", path: "/supplier", icon: <Truck size={20} /> },
           { name: "Products", path: "/products", icon: <PackageSearch size={20} /> },
