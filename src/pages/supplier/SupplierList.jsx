@@ -85,7 +85,7 @@ export default function SupplierList() {
         status: newStatus,
       });
 
-      if (res.data.success) {
+      if (res.data.status) {
         setSuppliers((prev) =>
           prev.map((s) => (s.id === supplier.id ? { ...s, status: newStatus } : s))
         );

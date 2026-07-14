@@ -83,7 +83,7 @@ export default function CategoryList() {
         id: category.id,
         status: newStatus,
       });
-      if (res.data.success) {
+      if (res.data.status) {
         setCategories((prev) =>
           prev.map((c) => (c.id === category.id ? { ...c, status: newStatus } : c))
         );
@@ -104,7 +104,7 @@ export default function CategoryList() {
         id: subcategory.id,
         status: newStatus,
       });
-      if (res.data.success) {
+      if (res.data.status) {
         setSubcategories((prev) =>
           prev.map((s) => (s.id === subcategory.id ? { ...s, status: newStatus } : s))
         );
@@ -304,7 +304,9 @@ export default function CategoryList() {
       {/* Company Selector Buttons */}
       <div style={{ marginBottom: "20px" }}>
         <div style={{ display: "flex", flexWrap: "wrap", gap: "10px" }}>
-          {companies.map((c) => {
+          {companies
+          .filter((c) => c.status === "active") 
+          .map((c) => {
             const isActive = Number(selectedCompany) === Number(c.id);
             return (
               <button

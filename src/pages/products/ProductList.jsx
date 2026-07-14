@@ -126,7 +126,7 @@ const handleCompanyChange = async(e) => {
         }
       );
 
-      if (res.data.success) {
+      if (res.data.status) {
 
         setProducts((prev) =>
           prev.map((p) =>

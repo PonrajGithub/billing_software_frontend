@@ -238,63 +238,76 @@ export default function CompanyList() {
     fetchCompanies();
   }, []);
 
-  // const handleDelete = async (id) => {
-  //   if (!window.confirm("Delete this company permanently?")) return;
+ 
+
+
+  // const toggleStatus = async (company) => {
+
+  //   const newStatus =
+  //     company.status === "active"
+  //       ? "inactive"
+  //       : "active";
+
   //   try {
-  //     const res = await api.post("/company/delete_company", { id });
-  //     if (res.data.status === true) {
-  //       setCompanies(prev => prev.filter(c => c.id !== id));
-  //       setDeleteId(null);
+
+  //     const res = await api.post(
+  //       "/company/toggle_company_status",
+  //       {
+  //         id: company.id,
+  //         company_status: newStatus,
+  //       }
+  //     );
+
+  //     if (res.data.success) {
+
+  //       setCompanies((prev) =>
+  //         prev.map((c) =>
+  //           c.id === company.id
+  //             ? { ...c, status: newStatus }
+  //             : c
+  //         )
+  //       );
+
   //     } else {
+
   //       alert(res.data.message);
+
   //     }
+
   //   } catch (err) {
+
   //     console.error(err);
   //     alert("Server error");
+
   //   }
   // };
-
-
+  
   const toggleStatus = async (company) => {
-
-    const newStatus =
-      company.status === "active"
-        ? "inactive"
-        : "active";
-
-    try {
-
-      const res = await api.post(
-        "/company/toggle_company_status",
-        {
-          id: company.id,
-          company_status: newStatus,
-        }
-      );
-
-      if (res.data.success) {
-
-        setCompanies((prev) =>
-          prev.map((c) =>
-            c.id === company.id
-              ? { ...c, status: newStatus }
-              : c
-          )
-        );
-
-      } else {
-
-        alert(res.data.message);
-
+  const newStatus = company.status === "active" ? "inactive" : "active";
+  try {
+    const res = await api.post(
+      "/company/toggle_company_status",
+      {
+        id: company.id,
+        status: newStatus,   // ✅ company_status -> status
       }
+    );
 
-    } catch (err) {
-
-      console.error(err);
-      alert("Server error");
-
+    if (res.data.status) {   // ✅ success -> status
+      setCompanies((prev) =>
+        prev.map((c) =>
+          c.id === company.id ? { ...c, status: newStatus } : c
+        )
+      );
+    } else {
+      alert(res.data.message);
     }
-  };
+  } catch (err) {
+    console.error(err);
+    alert("Server error");
+  }
+};
+  
   const filtered = companies.filter(c =>
     c.company_name?.toLowerCase().includes(search.toLowerCase()) ||
     c.company_code?.toLowerCase().includes(search.toLowerCase()) ||
