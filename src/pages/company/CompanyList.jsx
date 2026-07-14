@@ -679,12 +679,12 @@ export default function CompanyList() {
                       {/* Company name + logo */}
                       <td className="cl-td">
                         <div className="cl-company-cell">
-                          <div className="cl-avatar">
+                          {/* <div className="cl-avatar">
                             {c.logo
                               ? <img src={c.logo.startsWith("http") ? c.logo : `${API_BASE_URL_IMAGE}/${c.logo}`} alt={c.company_name} />
                               : getInitials(c.company_name)
                             }
-                          </div>
+                          </div> */}
                           <div>
                             <div className="cl-company-name">{c.company_name}</div>
                             {c.email && <div className="cl-company-sub">{c.email}</div>}
