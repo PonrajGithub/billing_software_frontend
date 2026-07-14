@@ -827,7 +827,7 @@ export default function RegisterCompany() {
       const isSuccess = res.data.status === true || res.data.status === 1 || res.data.status === "true" || res.data.status === "1" || res.data.status === "success";
 
       if (isSuccess) {
-        toast("Company & Admin created successfully!", "success");
+        toast("Company created successfully!", "success");
         setTimeout(() => navigate("/company"), 1200);
       } else {
         toast(res.data.message || res.data.msg || res.data.error || "Something went wrong", "error");
