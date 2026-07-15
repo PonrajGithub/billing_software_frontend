@@ -1988,7 +1988,7 @@ const adminId = user.role === "cashier" ? user.admin_id : user.id;
   /* ── Advance balance derived values ── */
   const advanceAvailable = parseFloat(customer.advance_balance) || 0;
   const pendingAmount    = parseFloat(customer.pending_amount)  || 0;
-  const advanceUsed      = paymentMethod === "credit" ? 0 : Math.min(advanceAvailable, total);
+  const advanceUsed      = Math.min(advanceAvailable, total);
   const effectiveTotal   = total - advanceUsed;
   const totalCovered     = received + advanceUsed;
   const balance          = totalCovered - total;
@@ -3046,7 +3046,7 @@ if (!selectedCompany) {
             </div>
 
             {/* ── ADVANCE BALANCE BANNER ── */}
-            {advanceAvailable > 0 && paymentMethod !== "credit" && (
+            {advanceAvailable > 0 && (
               <div style={{
                 display:"flex", alignItems:"center", justifyContent:"space-between",
                 background:"#f0fdf4", border:"1.5px solid #bbf7d0",
@@ -3142,7 +3142,10 @@ if (!selectedCompany) {
                 <div>
                   <div style={{ fontWeight:700, color:"#dc2626", fontSize:13 }}>Credit Sale</div>
                   <div style={{ fontSize:12, color:"#ef4444", marginTop:2 }}>
-                    Invoice will be saved as unpaid. Full amount ₹{total.toFixed(2)} recorded as outstanding.
+                    {advanceUsed > 0 
+                      ? `Invoice will be saved as unpaid. Outstanding amount of ₹${effectiveTotal.toFixed(2)} (after applying ₹${advanceUsed.toFixed(2)} advance) will be recorded as outstanding.`
+                      : `Invoice will be saved as unpaid. Full amount ₹${total.toFixed(2)} will be recorded as outstanding.`
+                    }
                     {customer.credit_limit > 0 && (
                       <span style={{ display:"block", marginTop:4, fontWeight:700 }}>
                         Credit Limit: ₹{Number(customer.credit_limit).toLocaleString()}
@@ -3338,12 +3341,43 @@ if (!selectedCompany) {
             {/* Credit outstanding */}
             {paymentMethod === "credit" && (
               <div style={{
-                display:"flex", justifyContent:"space-between", alignItems:"center",
-                padding:"12px 16px", borderRadius:12, marginBottom:20,
-                background:"#fef2f2", border:"1.5px solid #fecaca",
+                borderRadius: 12, overflow: "hidden",
+                border: "1.5px solid #fecaca",
+                marginBottom: 20,
+                background: "#fef2f2"
               }}>
-                <span style={{ fontWeight:700, color:"#dc2626", fontSize:14 }}>Outstanding Amount</span>
-                <span style={{ fontWeight:900, fontSize:16, color:"#dc2626" }}>₹{total.toFixed(2)}</span>
+                {/* Header */}
+                <div style={{
+                  background: "#fee2e2", padding: "8px 14px",
+                  borderBottom: "1px solid #fecaca",
+                  fontSize: 10.5, fontWeight: 700, color: "#dc2626",
+                  letterSpacing: ".08em", textTransform: "uppercase",
+                }}>
+                  Credit Sale Summary
+                </div>
+
+                <div style={{ padding: "12px 14px", display: "flex", flexDirection: "column", gap: 8 }}>
+                  {/* Current Bill Outstanding */}
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <span style={{ fontSize: 13, color: "#991b1b", fontWeight: 600 }}>This Invoice Outstanding</span>
+                    <span style={{ fontSize: 15, fontWeight: 800, color: "#dc2626" }}>₹{effectiveTotal.toFixed(2)}</span>
+                  </div>
+
+                  {/* Previous Pending */}
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <span style={{ fontSize: 13, color: "#991b1b", fontWeight: 600 }}>Previous Outstanding</span>
+                    <span style={{ fontSize: 15, fontWeight: 800, color: "#dc2626" }}>₹{pendingAmount.toFixed(2)}</span>
+                  </div>
+
+                  {/* Divider */}
+                  <div style={{ borderTop: "1px dashed #fca5a5", margin: "4px 0" }} />
+
+                  {/* Total Outstanding */}
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <span style={{ fontSize: 13, color: "#991b1b", fontWeight: 800 }}>Total Outstanding</span>
+                    <span style={{ fontSize: 17, fontWeight: 900, color: "#991b1b" }}>₹{(pendingAmount + effectiveTotal).toFixed(2)}</span>
+                  </div>
+                </div>
               </div>
             )}
 

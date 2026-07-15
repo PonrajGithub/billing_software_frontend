@@ -2303,7 +2303,7 @@ import autoTable from "jspdf-autotable";
 import {
   Pencil, Search, Phone, MapPin, Download, Wallet,
   CheckCircle, ChevronRight, Filter, IndianRupee, X, MessageCircle,
-  FileDown, ChevronLeft,
+  FileDown, ChevronLeft, History
 } from "lucide-react";
 
 const fmt = (n) => Number(n || 0).toLocaleString("en-IN");
@@ -2337,11 +2337,16 @@ const admin_id = user?.role === "cashier" ? user?.admin_id : user?.id;
   const [invoiceHistory,   setInvoiceHistory]   = useState([]);
   const [allHistory,       setAllHistory]       = useState([]);
   const [toast,            setToast]            = useState(null);
+  const [showHistoryModal, setShowHistoryModal] = useState(false);
+  const [paymentHistory,   setPaymentHistory]   = useState([]);
+  const [loadingHistory,   setLoadingHistory]   = useState(false);
 
   /* collect popup */
   const [showCollect,   setShowCollect]   = useState(false);
   const [collectAmount, setCollectAmount] = useState("");
   const [collectMethod, setCollectMethod] = useState("cash");
+  const [collectDate,   setCollectDate]   = useState(new Date().toISOString().split("T")[0]);
+  const [collectNotes,  setCollectNotes]  = useState("");
   const [collecting,    setCollecting]    = useState(false);
   const [preview,       setPreview]       = useState([]);
 
@@ -2456,8 +2461,14 @@ const fetchCustomerHistory = async (customerId, overrides = {}) => {
 
   useEffect(() => {
     const pending = invoiceHistory.filter(i => Number(i.balance_amount) > 0);
+    // Sort oldest first (FIFO) for payment distribution preview
+    const sortedPending = [...pending].sort((a, b) => {
+      const da = new Date(a.created_at || a.invoice_date || 0);
+      const db = new Date(b.created_at || b.invoice_date || 0);
+      return da - db || a.id - b.id;
+    });
     if (!collectAmount || Number(collectAmount) <= 0) { setPreview([]); return; }
-    setPreview(distributePayment(pending, collectAmount));
+    setPreview(distributePayment(sortedPending, collectAmount));
   }, [collectAmount, invoiceHistory]);
 
   const getCustomerPendingTotal = (customerId) =>
@@ -2549,25 +2560,62 @@ const fetchCustomerHistory = async (customerId, overrides = {}) => {
   };
 
   /* ── collect ── */
-  const openCollect = () => { setCollectAmount(""); setCollectMethod("cash"); setPreview([]); setShowCollect(true); };
+  const openCollect = () => {
+    setCollectAmount("");
+    setCollectMethod("cash");
+    setCollectDate(new Date().toISOString().split("T")[0]);
+    setCollectNotes("");
+    setPreview([]);
+    setShowCollect(true);
+  };
 
   const handleBulkCollect = async () => {
     if (!collectAmount || Number(collectAmount) <= 0) { showToast("Enter a valid amount", false); return; }
-    if (Number(collectAmount) > totalPending)         { showToast("Amount exceeds total pending", false); return; }
+
     setCollecting(true);
-    const toUpdate = distributePayment(pendingInvoices, collectAmount).filter(i => i._applying > 0);
     try {
-      for (const inv of toUpdate) {
-        await api.post("/invoice/update_credit_payment", {
-          invoice_id: inv.id, amount: inv._applying, payment_method: collectMethod,
-        });
+      const res = await api.post("/invoice/pay_customer_bulk", {
+        company_id:     localStorage.getItem("selected_company_id") || "",
+        customer_id:    selectedCustomer.id,
+        amount:         Number(collectAmount),
+        payment_method: collectMethod,
+        payment_date:   collectDate,
+        notes:          collectNotes,
+      });
+
+      if (res.data.status) {
+        showToast("Payment collected successfully");
+        setShowCollect(false);
+        setCollectAmount("");
+        setPreview([]);
+        await fetchCustomers();
+        await fetchAllHistory();
+        await fetchCustomerHistory(selectedCustomer.id);
+      } else {
+        showToast(res.data.message || "Failed to collect payment", false);
       }
-      showToast("Payment collected successfully");
-      setShowCollect(false); setCollectAmount(""); setPreview([]);
-      await fetchCustomers(); await fetchAllHistory();
-      await fetchCustomerHistory(selectedCustomer.id);
-    } catch { showToast("Server error, please retry", false); }
-    finally { setCollecting(false); }
+    } catch (err) {
+      showToast(err.response?.data?.message || "Server error, please retry", false);
+    } finally {
+      setCollecting(false);
+    }
+  };
+
+  // Open customer payment history modal
+  const openCustomerHistoryModal = async (cust) => {
+    setPaymentHistory([]);
+    setShowHistoryModal(true);
+    setLoadingHistory(true);
+    try {
+      const res = await api.get(`/invoice/get_customer_payments?customer_id=${cust.id}`);
+      if (res.data.status) {
+        setPaymentHistory(res.data.data);
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoadingHistory(false);
+    }
   };
 
   /* ── send reminder ── */
@@ -2633,275 +2681,238 @@ const fetchCustomerHistory = async (customerId, overrides = {}) => {
         </div>
       )}
 
-      {/* COLLECT POPUP */}
-      {showCollect && (
-        <div onClick={e => { if (e.target === e.currentTarget) setShowCollect(false); }}
+      {/* ── COLLECT PAYMENT POPUP ── */}
+      {showCollect && selectedCustomer && (
+        <div
+          onClick={(e) => { if (e.target === e.currentTarget) setShowCollect(false); }}
           style={{
             position:"fixed", inset:0, zIndex:9999,
-            background:"rgba(15,23,42,.55)", backdropFilter:"blur(4px)",
-            display:"flex", alignItems:"center", justifyContent:"center", padding:20,
+            background:"rgba(15,23,42,.55)",
+            backdropFilter:"blur(4px)",
+            display:"flex", alignItems:"center", justifyContent:"center",
+            padding:20
           }}
         >
           <div style={{
-            background:"#fff", borderRadius:20, width:"100%", maxWidth:480,
-            maxHeight:"90vh", display:"flex", flexDirection:"column",
-            boxShadow:"0 24px 64px rgba(0,0,0,.22)",
-            animation:"popIn .25s cubic-bezier(.34,1.56,.64,1)", overflow:"hidden",
+            background:"#fff", borderRadius:20,
+            width:"100%", maxWidth:620,
+            maxHeight:"88vh",
+            display:"flex", flexDirection:"column",
+            boxShadow:"0 25px 50px -12px rgba(0,0,0,0.15)",
+            overflow:"hidden"
           }}>
-            {/* header */}
-            <div style={{
-              background:"linear-gradient(135deg,#1e3a8a,#2563eb)",
-              padding:"20px 24px", display:"flex", justifyContent:"space-between",
-              alignItems:"center", flexShrink:0,
-            }}>
-              <div>
-                <div style={{ display:"flex", alignItems:"center", gap:10, color:"#fff", fontWeight:800, fontSize:17 }}>
-                  <Wallet size={20}/> Collect Payment
+
+            {/* Header */}
+            <div style={{ padding: "20px 24px", borderBottom: "1px solid #e2e8f0", background: "linear-gradient(135deg, #eff6ff, #dbeafe)", flexShrink: 0 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: "18px", fontWeight: "800", color: "#0f172a", display: "flex", alignItems: "center", gap: 8 }}>
+                    <Wallet size={20} color="#2563eb" /> Collect Customer Payment
+                  </h3>
+                  <p style={{ margin: "4px 0 0", fontSize: "13px", color: "#475569" }}>
+                    Payment will be split across pending invoices oldest-first (FIFO) for <strong>{selectedCustomer.name}</strong>
+                  </p>
                 </div>
-                <div style={{ color:"rgba(255,255,255,.7)", fontSize:13, marginTop:3 }}>
-                  {selectedCustomer?.name}
+                <button
+                  onClick={() => setShowCollect(false)}
+                  style={{ border: "none", background: "#f1f5f9", color: "#475569", padding: "8px 14px", borderRadius: 10, fontWeight: 700, fontSize: 13, cursor: "pointer" }}
+                >
+                  ✕ Cancel
+                </button>
+              </div>
+
+              {/* Summary row */}
+              <div style={{ marginTop: 14, display: "flex", gap: 16 }}>
+                <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 10, padding: "8px 16px", textAlign: "center" }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: "#dc2626", textTransform: "uppercase" }}>Total Pending</div>
+                  <div style={{ fontSize: 18, fontWeight: 900, color: "#dc2626" }}>₹{fmt(totalPending)}</div>
+                </div>
+                <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 10, padding: "8px 16px", textAlign: "center" }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: "#15803d", textTransform: "uppercase" }}>Pending Invoices</div>
+                  <div style={{ fontSize: 18, fontWeight: 900, color: "#15803d" }}>
+                    {pendingInvoices.length}
+                  </div>
                 </div>
               </div>
-              <button onClick={() => setShowCollect(false)} style={{
-                width:36, height:36, borderRadius:10, border:"none",
-                background:"rgba(255,255,255,.15)", color:"#fff",
-                cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center",
-              }}>
-                <X size={18}/>
+            </div>
+
+            {/* Scrollable Form + Preview */}
+            <div style={{ overflowY:"auto", flex:1 }}>
+              <div style={{ padding: "18px 24px", display: "flex", flexDirection: "column", gap: 14 }}>
+
+                {/* Amount Input */}
+                <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                  <label style={{ fontSize: "12px", fontWeight: "700", color: "#64748b", textTransform: "uppercase" }}>Amount to Collect (₹) *</label>
+                  <div style={{ position: "relative" }}>
+                    <IndianRupee size={16} style={{ position: "absolute", left: 13, top: "50%", transform: "translateY(-50%)", color: "#94a3b8" }} />
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0.01"
+                      required
+                      value={collectAmount}
+                      onChange={(e) => setCollectAmount(e.target.value)}
+                      placeholder={`Total Pending: ₹${fmt(totalPending)}`}
+                      style={{
+                        width: "100%", padding: "11px 14px 11px 36px", borderRadius: "10px",
+                        border: "1.5px solid #e2e8f0", outline: "none", fontSize: "16px",
+                        fontWeight: "700", boxSizing: "border-box"
+                      }}
+                    />
+                  </div>
+                  {/* Excess balance notice banner */}
+                  {Number(collectAmount) > totalPending && (
+                    <div style={{
+                      background: "#eff6ff", border: "1.5px solid #bfdbfe",
+                      borderRadius: 10, padding: "10px 12px", color: "#1e40af",
+                      fontSize: "12px", fontWeight: "600", marginTop: 4, display: "flex", gap: 6, alignItems: "center"
+                    }}>
+                      ℹ️ Excess of <strong>₹{fmt(Number(collectAmount) - totalPending)}</strong> will be saved as advance balance.
+                    </div>
+                  )}
+                  {/* Quick percentage helper buttons */}
+                  <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+                    {[25, 50, 100].map((pct) => {
+                      const val = Math.round(totalPending * pct / 100);
+                      return (
+                        <button
+                          key={pct}
+                          type="button"
+                          onClick={() => setCollectAmount(String(val))}
+                          style={{
+                            flex: 1, padding: "6px 0", fontSize: "12px", fontWeight: 700,
+                            background: "#eff6ff", color: "#2563eb",
+                            border: "1.5px solid #bfdbfe", borderRadius: 8, cursor: "pointer",
+                            transition: "background .15s"
+                          }}
+                        >
+                          {pct}% (₹{fmt(val)})
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Method + Date row */}
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                    <label style={{ fontSize: "12px", fontWeight: "700", color: "#64748b", textTransform: "uppercase" }}>Payment Method</label>
+                    <select
+                      value={collectMethod}
+                      onChange={(e) => setCollectMethod(e.target.value)}
+                      style={{ width: "100%", padding: "10px 12px", borderRadius: "10px", border: "1.5px solid #e2e8f0", outline: "none", fontSize: "13px", background: "#fff", boxSizing: "border-box" }}
+                    >
+                      <option value="cash">Cash</option>
+                      <option value="online">Online Transfer</option>
+                      <option value="upi">UPI</option>
+                      <option value="card">Card</option>
+                      <option value="loyalty">Loyalty</option>
+                    </select>
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                    <label style={{ fontSize: "12px", fontWeight: "700", color: "#64748b", textTransform: "uppercase" }}>Payment Date</label>
+                    <input
+                      type="date"
+                      value={collectDate}
+                      onChange={(e) => setCollectDate(e.target.value)}
+                      style={{ width: "100%", padding: "10px 12px", borderRadius: "10px", border: "1.5px solid #e2e8f0", outline: "none", fontSize: "13px", boxSizing: "border-box" }}
+                    />
+                  </div>
+                </div>
+
+                {/* Notes */}
+                <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                  <label style={{ fontSize: "12px", fontWeight: "700", color: "#64748b", textTransform: "uppercase" }}>Notes / Reference</label>
+                  <input
+                    type="text"
+                    value={collectNotes}
+                    onChange={(e) => setCollectNotes(e.target.value)}
+                    placeholder="e.g. Transaction ID, Cheque No or bank remarks."
+                    style={{ width: "100%", padding: "10px 14px", borderRadius: "10px", border: "1.5px solid #e2e8f0", outline: "none", fontSize: "13px", boxSizing: "border-box" }}
+                  />
+                </div>
+
+                {/* Live Split Preview */}
+                {preview.length > 0 && (
+                  <div style={{ borderRadius: "12px", border: "1px solid #e2e8f0", overflow: "hidden", marginTop: 4 }}>
+                    <div style={{ padding: "10px 14px", background: "#f8fafc", borderBottom: "1px solid #e2e8f0", fontSize: "12px", fontWeight: "700", color: "#334155", textTransform: "uppercase", letterSpacing: ".5px" }}>
+                      📊 Distribution Preview (FIFO – Oldest Invoices First)
+                    </div>
+                    <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "left" }}>
+                      <thead>
+                        <tr style={{ background: "#f8fafc", borderBottom: "1px solid #e2e8f0" }}>
+                          <th style={{ padding: "9px 12px", fontSize: "11px", color: "#64748b", fontWeight: "700", textTransform: "uppercase" }}>Invoice No</th>
+                          <th style={{ padding: "9px 12px", fontSize: "11px", color: "#64748b", fontWeight: "700", textTransform: "uppercase" }}>Due Date</th>
+                          <th style={{ padding: "9px 12px", fontSize: "11px", color: "#64748b", fontWeight: "700", textTransform: "uppercase" }}>Pending</th>
+                          <th style={{ padding: "9px 12px", fontSize: "11px", color: "#64748b", fontWeight: "700", textTransform: "uppercase" }}>Applying</th>
+                          <th style={{ padding: "9px 12px", fontSize: "11px", color: "#64748b", fontWeight: "700", textTransform: "uppercase" }}>New Balance</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {preview.map((p, idx) => {
+                          const willPay = Number(p._applying) > 0;
+                          const fullyClear = Number(p._newBalance) <= 0;
+                          return (
+                            <tr key={p.id} style={{ borderBottom: "1px solid #f1f5f9", background: willPay ? (fullyClear ? "#f0fdf4" : "#fffbeb") : "#fff" }}>
+                              <td style={{ padding: "9px 12px", fontSize: "13px", fontWeight: "700", color: "#0f172a" }}>
+                                {p.invoice_no || "N/A"}
+                              </td>
+                              <td style={{ padding: "9px 12px", fontSize: "12px", color: "#64748b" }}>
+                                {p.due_date ? formatDate(p.due_date) : "-"}
+                              </td>
+                              <td style={{ padding: "9px 12px", fontSize: "13px", color: "#dc2626", fontWeight: "600" }}>
+                                ₹{fmt(p.balance_amount)}
+                              </td>
+                              <td style={{ padding: "9px 12px", fontSize: "13px", fontWeight: "700", color: willPay ? "#16a34a" : "#94a3b8" }}>
+                                {willPay ? `₹${fmt(p._applying)}` : "—"}
+                              </td>
+                              <td style={{ padding: "9px 12px", fontSize: "13px", fontWeight: "700" }}>
+                                <span style={{
+                                  padding: "3px 8px", borderRadius: 20, fontSize: 12,
+                                  background: fullyClear ? "#dcfce7" : (willPay ? "#fef9c3" : "#f1f5f9"),
+                                  color: fullyClear ? "#15803d" : (willPay ? "#92400e" : "#94a3b8")
+                                }}>
+                                  {fullyClear ? "✓ Cleared" : `₹${fmt(p._newBalance)}`}
+                                </span>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Footer Buttons */}
+            <div style={{ padding: "16px 24px", borderTop: "1px solid #e2e8f0", background: "#f8fafc", display: "flex", gap: 10, flexShrink: 0 }}>
+              <button
+                type="button"
+                onClick={() => setShowCollect(false)}
+                style={{
+                  flex: 1, padding: "12px", borderRadius: "10px", border: "1.5px solid #cbd5e1",
+                  background: "#ffffff", color: "#475569", fontWeight: "600", fontSize: "14px", cursor: "pointer"
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleBulkCollect}
+                disabled={collecting || !collectAmount || Number(collectAmount) <= 0}
+                style={{
+                  flex: 2, padding: "12px", borderRadius: "10px", border: "none",
+                  background: collecting ? "#94a3b8" : "linear-gradient(135deg, #2563eb, #1d4ed8)",
+                  color: "#ffffff", fontWeight: "700", fontSize: "14px", cursor: collecting ? "not-allowed" : "pointer",
+                  boxShadow: "0 4px 12px rgba(37,99,235,0.2)", display: "flex", alignItems: "center", justifyContent: "center", gap: 8
+                }}
+              >
+                <Wallet size={16} />
+                {collecting ? "Processing..." : `Collect ₹${collectAmount ? fmt(Math.min(Number(collectAmount), totalPending)) : "0"}`}
               </button>
             </div>
 
-            {/* body */}
-            <div style={{ overflowY:"auto", flex:1, padding:"22px 24px" }}>
-              <div style={{
-                background:"linear-gradient(135deg,#fef2f2,#fff5f5)",
-                border:"1px solid #fecaca", borderRadius:14,
-                padding:"16px 20px", marginBottom:20,
-                display:"flex", justifyContent:"space-between", alignItems:"center",
-              }}>
-                <div>
-                  <div style={{ fontSize:11, fontWeight:700, color:"#dc2626", textTransform:"uppercase" }}>
-                    Total Pending
-                  </div>
-                  <div style={{ fontSize:30, fontWeight:900, color:"#dc2626", marginTop:2 }}>
-                    ₹{fmt(totalPending)}
-                  </div>
-                </div>
-                <div style={{ textAlign:"right" }}>
-                  <div style={{ fontSize:11, color:"#ef4444", fontWeight:600 }}>
-                    {pendingInvoices.length} invoice{pendingInvoices.length !== 1 ? "s" : ""}
-                  </div>
-                  <div style={{ marginTop:6 }}>
-                    {pendingInvoices.map((inv, i) => {
-                      const prev = preview.find(p => p.id === inv.id);
-                      const applying = prev ? prev._applying : 0;
-                      return (
-                        <div key={i} style={{
-                          fontSize:11, color: applying > 0 ? "#16a34a" : "#94a3b8",
-                          fontWeight:600, textAlign:"right",
-                        }}>
-                          {applying > 0
-                            ? `✓ ₹${fmt(inv.balance_amount)} → ₹${fmt(Number(inv.balance_amount) - applying)}`
-                            : `₹${fmt(inv.balance_amount)} pending`}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              </div>
-
-              {pendingInvoices.length === 0 ? (
-                <div style={{ textAlign:"center", padding:"28px 0", color:"#64748b" }}>
-                  <CheckCircle size={44} style={{ color:"#86efac", marginBottom:10 }}/>
-                  <div style={{ fontWeight:700, fontSize:16, color:"#16a34a" }}>All Cleared!</div>
-                  <div style={{ fontSize:13, marginTop:4 }}>No pending payments</div>
-                </div>
-              ) : (
-                <>
-                  <div style={{ marginBottom:18 }}>
-                    <div style={{ fontSize:11, fontWeight:700, color:"#94a3b8", textTransform:"uppercase", letterSpacing:".5px", marginBottom:8 }}>
-                      Pending Breakdown
-                    </div>
-                    {pendingInvoices.map((inv, i) => {
-                      const prev = preview.find(p => p.id === inv.id);
-                      const applying = prev ? prev._applying : 0;
-                      return (
-                        <div key={i} style={{
-                          display:"flex", justifyContent:"space-between", alignItems:"center",
-                          padding:"10px 14px", borderRadius:10, marginBottom:6,
-                          background: applying > 0 ? "#f0fdf4" : "#f8fafc",
-                          border: applying > 0 ? "1.5px solid #86efac" : "1.5px solid #f1f5f9",
-                        }}>
-                          <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-                            <div style={{
-                              width:32, height:32, borderRadius:8,
-                              background: applying > 0 ? "#dcfce7" : "#f1f5f9",
-                              display:"flex", alignItems:"center", justifyContent:"center",
-                              fontSize:12, fontWeight:800,
-                              color: applying > 0 ? "#16a34a" : "#94a3b8",
-                            }}>#{i+1}</div>
-                            <div>
-                              <div style={{ fontSize:13, fontWeight:700, color:"#0f172a", textTransform:"capitalize" }}>
-                                {inv.payment_method || "Invoice"}
-                              </div>
-                              {inv.due_date && (
-                                <div style={{ fontSize:11, color:"#94a3b8" }}>Due: {formatDate(inv.due_date)}</div>
-                              )}
-                            </div>
-                          </div>
-                          <div style={{ textAlign:"right" }}>
-                            <div style={{ fontSize:14, fontWeight:800, color:"#dc2626" }}>
-                              ₹{fmt(inv.balance_amount)}
-                            </div>
-                            {applying > 0 && (
-                              <div style={{ fontSize:11, color:"#16a34a", fontWeight:700 }}>
-                                −₹{fmt(applying)} → ₹{fmt(Number(inv.balance_amount) - applying)}
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-
-                  <div style={{ height:1, background:"#f1f5f9", marginBottom:18 }}/>
-
-                  <div style={{ marginBottom:14 }}>
-                    <label style={{ fontSize:12, fontWeight:700, color:"#374151", display:"block", marginBottom:7 }}>
-                      Amount to Collect
-                    </label>
-                    <div style={{ position:"relative" }}>
-                      <IndianRupee size={16} style={{
-                        position:"absolute", left:13, top:"50%",
-                        transform:"translateY(-50%)", color:"#94a3b8",
-                      }}/>
-                      <input
-                        type="number" placeholder="0" value={collectAmount}
-                        onChange={e => setCollectAmount(e.target.value)} autoFocus
-                        style={{
-                          width:"100%", padding:"13px 14px 13px 38px",
-                          borderRadius:12, border:"2px solid #dbeafe",
-                          outline:"none", fontSize:18, fontWeight:800,
-                          boxSizing:"border-box", color:"#0f172a",
-                        }}
-                        onFocus={e => (e.target.style.borderColor="#2563eb")}
-                        onBlur={e  => (e.target.style.borderColor="#dbeafe")}
-                      />
-                    </div>
-                    <div style={{ display:"flex", gap:8, marginTop:10 }}>
-                      {[25,50,100].map(pct => {
-                        const val = Math.round(totalPending * pct / 100);
-                        return (
-                          <button key={pct} className="quick-btn"
-                            onClick={() => setCollectAmount(String(val))}
-                            style={{
-                              flex:1, padding:"8px 0", fontSize:12, fontWeight:700,
-                              background:"#eff6ff", color:"#2563eb",
-                              border:"1.5px solid #bfdbfe", borderRadius:9, cursor:"pointer",
-                            }}
-                          >
-                            {pct}%<br/>
-                            <span style={{ fontSize:11 }}>₹{fmt(val)}</span>
-                          </button>
-                        );
-                      })}
-                      <button className="quick-btn"
-                        onClick={() => setCollectAmount(String(totalPending))}
-                        style={{
-                          flex:1, padding:"8px 0", fontSize:12, fontWeight:700,
-                          background:"#eff6ff", color:"#2563eb",
-                          border:"1.5px solid #bfdbfe", borderRadius:9, cursor:"pointer",
-                        }}
-                      >
-                        Full<br/><span style={{ fontSize:11 }}>₹{fmt(totalPending)}</span>
-                      </button>
-                    </div>
-                  </div>
-
-                  <div style={{ marginBottom:20 }}>
-                    <label style={{ fontSize:12, fontWeight:700, color:"#374151", display:"block", marginBottom:7 }}>
-                      Payment Method
-                    </label>
-                    <div style={{ display:"flex", gap:10 }}>
-                      {["cash","online","upi"].map(m => (
-                        <button key={m} className="method-btn"
-                          onClick={() => setCollectMethod(m)}
-                          style={{
-                            flex:1, padding:"11px 0", fontSize:13, fontWeight:700,
-                            textTransform:"capitalize", borderRadius:11, cursor:"pointer",
-                            background: collectMethod===m ? "#2563eb" : "#fff",
-                            color:      collectMethod===m ? "#fff"    : "#64748b",
-                            border:     collectMethod===m ? "2px solid #2563eb" : "2px solid #e5e7eb",
-                          }}
-                        >
-                          {m==="cash"?"💵":m==="online"?"🏦":"📱"} {m}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  {preview.filter(p => p._applying > 0).length > 0 && (
-                    <div style={{
-                      background:"#f0fdf4", border:"1.5px solid #bbf7d0",
-                      borderRadius:12, padding:"14px 16px", marginBottom:20,
-                      animation:"fadeUp .2s ease",
-                    }}>
-                      <div style={{ fontSize:11, fontWeight:700, color:"#16a34a", marginBottom:10, textTransform:"uppercase" }}>
-                        ✓ Payment Distribution
-                      </div>
-                      {preview.filter(p => p._applying > 0).map((p, i) => (
-                        <div key={i} style={{
-                          display:"flex", justifyContent:"space-between",
-                          fontSize:13, color:"#166534", marginBottom:5, fontWeight:600,
-                        }}>
-                          <span style={{ display:"flex", alignItems:"center", gap:6 }}>
-                            <ChevronRight size={13}/>
-                            <span style={{ textTransform:"capitalize" }}>{p.payment_method||"Invoice"}</span>
-                            <span style={{ color:"#86efac" }}>#{i+1}</span>
-                          </span>
-                          <span>−₹{fmt(p._applying)}</span>
-                        </div>
-                      ))}
-                      <div style={{
-                        borderTop:"1.5px solid #86efac", marginTop:10, paddingTop:10,
-                        display:"flex", justifyContent:"space-between",
-                        fontWeight:800, fontSize:14, color:"#15803d",
-                      }}>
-                        <span>Remaining balance</span>
-                        <span>₹{fmt(Math.max(0, totalPending - Number(collectAmount)))}</span>
-                      </div>
-                    </div>
-                  )}
-                </>
-              )}
-            </div>
-
-            {pendingInvoices.length > 0 && (
-              <div style={{
-                padding:"16px 24px", borderTop:"1px solid #f1f5f9",
-                display:"flex", gap:10, flexShrink:0, background:"#fff",
-              }}>
-                <button onClick={() => setShowCollect(false)} style={{
-                  flex:1, padding:"13px 0", borderRadius:12,
-                  border:"2px solid #e5e7eb", background:"#fff",
-                  fontWeight:700, fontSize:14, cursor:"pointer", color:"#64748b",
-                }}>Cancel</button>
-                <button className="collect-btn" onClick={handleBulkCollect} disabled={collecting}
-                  style={{
-                    flex:2, padding:"13px 0",
-                    background: collecting ? "#93c5fd" : "#2563eb",
-                    color:"#fff", border:"none", borderRadius:12,
-                    fontWeight:800, fontSize:14,
-                    cursor: collecting ? "not-allowed" : "pointer",
-                    display:"flex", alignItems:"center", justifyContent:"center", gap:8,
-                    boxShadow:"0 4px 16px rgba(37,99,235,.35)",
-                  }}
-                >
-                  <Wallet size={17}/>
-                  {collecting ? "Processing..." : "Collect Payment"}
-                </button>
-              </div>
-            )}
           </div>
         </div>
       )}
@@ -3130,6 +3141,21 @@ const fetchCustomerHistory = async (customerId, overrides = {}) => {
                       </button>
                     )}
 
+                    {/* Payment History Button */}
+                    <button
+                      onClick={() => openCustomerHistoryModal(selectedCustomer)}
+                      style={{
+                        background:"#f1f5f9", border:"1.5px solid #e2e8f0",
+                        borderRadius:12, padding:"10px 16px", fontWeight:700, fontSize:13,
+                        cursor:"pointer", display:"flex", alignItems:"center", gap:7,
+                        color:"#475569", transition:"all .15s"
+                      }}
+                      onMouseEnter={(e) => (e.currentTarget.style.background = "#e2e8f0")}
+                      onMouseLeave={(e) => (e.currentTarget.style.background = "#f1f5f9")}
+                    >
+                      <History size={15}/> Payment History
+                    </button>
+
                     {/* Collect */}
                     {totalPending > 0 && (
                       <button onClick={openCollect}
@@ -3297,6 +3323,120 @@ const fetchCustomerHistory = async (customerId, overrides = {}) => {
           </div>
         </div>
       </div>
+      {/* ── CUSTOMER PAYMENT HISTORY MODAL ── */}
+      {showHistoryModal && (
+        <div style={{
+          position: "fixed", top: 0, left: 0, right: 0, bottom: 0,
+          background: "rgba(15, 23, 42, 0.45)", backdropFilter: "blur(4px)",
+          display: "flex", alignItems: "center", justifyContent: "center", zIndex: 10000
+        }}>
+          <div style={{
+            background: "#ffffff", width: "100%", maxWidth: "750px",
+            borderRadius: "20px", border: "1px solid #e2e8f0", overflow: "hidden",
+            boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)",
+            maxHeight: "80vh", display: "flex", flexDirection: "column"
+          }}>
+            {/* Modal Header */}
+            <div style={{ padding: "18px 22px", borderBottom: "1px solid #e2e8f0", background: "#f8fafc", flexShrink: 0 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: "18px", fontWeight: "800", color: "#0f172a" }}>
+                    Payment History
+                  </h3>
+                  <p style={{ margin: "4px 0 0", fontSize: "13px", color: "#64748b" }}>
+                    All payments recorded for <strong>{selectedCustomer?.name}</strong>
+                  </p>
+                </div>
+                <button
+                  onClick={() => setShowHistoryModal(false)}
+                  style={{
+                    border: "none", background: "#f1f5f9", color: "#475569",
+                    padding: "8px 14px", borderRadius: 10, fontWeight: 700,
+                    fontSize: 13, cursor: "pointer"
+                  }}
+                >
+                  ✕ Close
+                </button>
+              </div>
+
+              {/* Summary bar */}
+              {!loadingHistory && paymentHistory.length > 0 && (
+                <div style={{
+                  marginTop: 12, background: "#f0fdf4", border: "1px solid #bbf7d0",
+                  borderRadius: 10, padding: "10px 14px",
+                  display: "flex", gap: 24, alignItems: "center"
+                }}>
+                  <div>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: "#15803d", textTransform: "uppercase" }}>Total Paid</span>
+                    <div style={{ fontSize: 16, fontWeight: 800, color: "#15803d" }}>
+                      ₹{fmt(paymentHistory.reduce((s, h) => s + Number(h.amount || 0), 0))}
+                    </div>
+                  </div>
+                  <div>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: "#475569", textTransform: "uppercase" }}>Transactions</span>
+                    <div style={{ fontSize: 16, fontWeight: 800, color: "#334155" }}>{paymentHistory.length}</div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Body */}
+            <div style={{ overflowY: "auto", flex: 1 }}>
+              {loadingHistory ? (
+                <div style={{ textAlign: "center", padding: "40px", color: "#64748b" }}>Loading payment records...</div>
+              ) : paymentHistory.length === 0 ? (
+                <div style={{ textAlign: "center", padding: "40px", color: "#94a3b8" }}>
+                  <div style={{ fontSize: 40, marginBottom: 10 }}>🧾</div>
+                  No payment records found for this customer yet.
+                </div>
+              ) : (
+                <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "left" }}>
+                  <thead style={{ position: "sticky", top: 0, background: "#f8fafc", zIndex: 1 }}>
+                    <tr style={{ borderBottom: "2px solid #e2e8f0" }}>
+                      <th style={{ padding: "11px 16px", fontSize: "11px", color: "#64748b", fontWeight: "700", textTransform: "uppercase" }}>Bill No</th>
+                      <th style={{ padding: "11px 16px", fontSize: "11px", color: "#64748b", fontWeight: "700", textTransform: "uppercase" }}>Bill Date</th>
+                      <th style={{ padding: "11px 16px", fontSize: "11px", color: "#64748b", fontWeight: "700", textTransform: "uppercase" }}>Pay Date</th>
+                      <th style={{ padding: "11px 16px", fontSize: "11px", color: "#64748b", fontWeight: "700", textTransform: "uppercase" }}>Amount Paid</th>
+                      <th style={{ padding: "11px 16px", fontSize: "11px", color: "#64748b", fontWeight: "700", textTransform: "uppercase" }}>Method</th>
+                      <th style={{ padding: "11px 16px", fontSize: "11px", color: "#64748b", fontWeight: "700", textTransform: "uppercase" }}>Notes</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {paymentHistory.map((h, idx) => (
+                      <tr key={h.id} style={{ borderBottom: "1px solid #f1f5f9", background: idx % 2 === 0 ? "#fff" : "#fafafa" }}>
+                        <td style={{ padding: "11px 16px", fontSize: "13px", color: "#0f172a", fontWeight: "700" }}>
+                          {h.invoice_no || "N/A"}
+                        </td>
+                        <td style={{ padding: "11px 16px", fontSize: "13px", color: "#64748b" }}>
+                          {h.invoice_date ? formatDate(h.invoice_date) : "-"}
+                        </td>
+                        <td style={{ padding: "11px 16px", fontSize: "13px", color: "#334155", fontWeight: "500" }}>
+                          {h.payment_date ? formatDate(h.payment_date) : "-"}
+                        </td>
+                        <td style={{ padding: "11px 16px", fontSize: "13px", color: "#16a34a", fontWeight: "700" }}>
+                          ₹{fmt(h.amount)}
+                        </td>
+                        <td style={{ padding: "11px 16px", fontSize: "13px", color: "#475569", textTransform: "capitalize" }}>
+                          <span style={{
+                            padding: "3px 9px", borderRadius: 20, fontSize: 11, fontWeight: 700,
+                            background: h.payment_method === "cash" ? "#f0fdf4" : "#eff6ff",
+                            color: h.payment_method === "cash" ? "#15803d" : "#2563eb"
+                          }}>
+                            {h.payment_method}
+                          </span>
+                        </td>
+                        <td style={{ padding: "11px 16px", fontSize: "13px", color: "#64748b" }}>
+                          {h.notes || "-"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }
