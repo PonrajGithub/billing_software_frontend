@@ -245,10 +245,10 @@ export default function PurchaseList() {
   // Helper formatting currency
   const fmt = (n) => Number(n || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-  // Get total pending amount for a supplier
+  // Get total pending amount for a supplier (submitted invoices only, drafts excluded)
   const getSupplierPendingTotal = (supplierId) => {
     return purchases
-      .filter((p) => Number(p.supplier_id) === Number(supplierId))
+      .filter((p) => Number(p.supplier_id) === Number(supplierId) && p.status === "submitted")
       .reduce((sum, p) => sum + Number(p.balance_amount || 0), 0);
   };
 

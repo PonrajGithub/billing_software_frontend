@@ -310,7 +310,7 @@ export default function EditCompany() {
     setLoading(true);
     try {
       let base64Logo = "";
-      if (form.logo) base64Logo = await convertToBase64(form.logo);
+      if (form.logo instanceof File) base64Logo = await convertToBase64(form.logo);
 
       const res = await api.post("/company/update_company", {
         id,
@@ -335,7 +335,8 @@ export default function EditCompany() {
       } else {
         toast(res.data.message || res.data.msg || "Update failed", "error");
       }
-    } catch {
+    } catch (err) {
+      console.error("Company update error:", err);
       toast("Server error. Please try again.", "error");
     }
     setLoading(false);
@@ -473,7 +474,7 @@ export default function EditCompany() {
             </div>
 
             {form.gst_type === "with_gst" && (
-              <Field label="GSTIN *" error={errors.gstin}>
+              <Field label="GSTIN (Optional)" error={errors.gstin}>
                 <input className="ec-input" placeholder="e.g. 33ABCDE1234F1Z5"
                   value={form.gstin}
                   maxLength={15}

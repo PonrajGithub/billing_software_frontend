@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "../../services/api";
-import { ArrowLeft, Download, Calendar } from "lucide-react";
+import { ArrowLeft, Download, Calendar, ChevronLeft, ChevronRight } from "lucide-react";
 import * as XLSX from "xlsx";
 
 export default function PurchaseGSTReport() {
@@ -22,6 +22,12 @@ export default function PurchaseGSTReport() {
 
   const [startDate, setStartDate] = useState(getFirstDayOfMonth());
   const [endDate, setEndDate] = useState(getToday());
+  const [showGstOnly, setShowGstOnly] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [showGstOnly, purchases]);
 
   useEffect(() => {
     const user = JSON.parse(localStorage.getItem("user"));
@@ -72,16 +78,21 @@ export default function PurchaseGSTReport() {
     }
   };
 
+  // Filter purchases if showGstOnly is active
+  const filteredPurchases = showGstOnly
+    ? purchases.filter(p => p.supplier_gstin && p.supplier_gstin.trim() !== "" && p.supplier_gstin.toLowerCase() !== "n/a")
+    : purchases;
+
   // Export to Excel
   const exportToExcel = () => {
-    if (purchases.length === 0) {
+    if (filteredPurchases.length === 0) {
       alert("No data available to export");
       return;
     }
 
     const companyName = companies.find(c => Number(c.id) === Number(selectedCompany))?.company_name || "Company";
 
-    const data = purchases.map((p, index) => {
+    const data = filteredPurchases.map((p, index) => {
       const taxable = Number(p.sub_total);
       const gst = Number(p.gst_total);
       // Assume CGST & SGST are 50% each of total GST
@@ -107,9 +118,9 @@ export default function PurchaseGSTReport() {
     XLSX.utils.book_append_sheet(workbook, worksheet, "GST Purchase Report");
 
     // Add totals row
-    const totalTaxable = purchases.reduce((sum, p) => sum + Number(p.sub_total), 0);
-    const totalGst = purchases.reduce((sum, p) => sum + Number(p.gst_total), 0);
-    const totalAmount = purchases.reduce((sum, p) => sum + Number(p.total_amount), 0);
+    const totalTaxable = filteredPurchases.reduce((sum, p) => sum + Number(p.sub_total), 0);
+    const totalGst = filteredPurchases.reduce((sum, p) => sum + Number(p.gst_total), 0);
+    const totalAmount = filteredPurchases.reduce((sum, p) => sum + Number(p.total_amount), 0);
 
     XLSX.utils.sheet_add_aoa(worksheet, [
       [],
@@ -120,12 +131,53 @@ export default function PurchaseGSTReport() {
   };
 
   // Calculations
-  const totalTaxable = purchases.reduce((sum, p) => sum + Number(p.sub_total), 0);
-  const totalGst = purchases.reduce((sum, p) => sum + Number(p.gst_total), 0);
-  const totalBillAmount = purchases.reduce((sum, p) => sum + Number(p.total_amount), 0);
+  const totalTaxable = filteredPurchases.reduce((sum, p) => sum + Number(p.sub_total), 0);
+  const totalGst = filteredPurchases.reduce((sum, p) => sum + Number(p.gst_total), 0);
+  const totalBillAmount = filteredPurchases.reduce((sum, p) => sum + Number(p.total_amount), 0);
+
+  // Pagination Calculations
+  const ITEMS_PER_PAGE = 15;
+  const totalPages = Math.ceil(filteredPurchases.length / ITEMS_PER_PAGE);
+  const safePage = Math.min(currentPage, totalPages || 1);
+  const indexOfLast = safePage * ITEMS_PER_PAGE;
+  const indexOfFirst = indexOfLast - ITEMS_PER_PAGE;
+  const paginatedPurchases = filteredPurchases.slice(indexOfFirst, indexOfLast);
 
   return (
     <div style={{ padding: "30px", background: "#f8fafc", minHeight: "100vh" }}>
+      <style>{`
+        .sl-page-btn {
+          width: 34px;
+          height: 34px;
+          border-radius: 9px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          border: 1.5px solid #e2e8f0;
+          background: #fff;
+          color: #64748b;
+          cursor: pointer;
+          font-weight: 600;
+          transition: .2s;
+        }
+
+        .sl-page-btn:hover:not(:disabled) {
+          background: #eff6ff;
+          color: #2563eb;
+          border-color: #3b82f6;
+        }
+
+        .sl-page-btn:disabled {
+          opacity: .4;
+          cursor: not-allowed;
+        }
+
+        .sl-page-btn.active {
+          background: linear-gradient(135deg,#1d4ed8,#3b82f6);
+          color: #fff;
+          border: none;
+        }
+      `}</style>
       {/* Header */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "25px" }}>
         <div style={{ display: "flex", alignItems: "center", gap: "15px" }}>
@@ -247,6 +299,33 @@ export default function PurchaseGSTReport() {
           </div>
         </div>
 
+        <div style={{ display: "flex", alignItems: "center", gap: "8px", height: "42px", paddingBottom: "2px" }}>
+          <input
+            type="checkbox"
+            id="gstToggle"
+            checked={showGstOnly}
+            onChange={(e) => setShowGstOnly(e.target.checked)}
+            style={{
+              width: "18px",
+              height: "18px",
+              cursor: "pointer",
+              accentColor: "#2563eb"
+            }}
+          />
+          <label
+            htmlFor="gstToggle"
+            style={{
+              fontSize: "14px",
+              fontWeight: "600",
+              color: "#475569",
+              cursor: "pointer",
+              userSelect: "none"
+            }}
+          >
+            GSTIN Only
+          </label>
+        </div>
+
         <button
           onClick={handleSearch}
           style={{
@@ -310,12 +389,12 @@ export default function PurchaseGSTReport() {
               <tr>
                 <td colSpan="9" style={{ padding: "40px", textAlign: "center", color: "#94a3b8" }}>Select a company to load GST reports</td>
               </tr>
-            ) : purchases.length === 0 ? (
+            ) : filteredPurchases.length === 0 ? (
               <tr>
                 <td colSpan="9" style={{ padding: "40px", textAlign: "center", color: "#94a3b8" }}>No submitted purchases found for the selected date range.</td>
               </tr>
             ) : (
-              purchases.map((p) => {
+              paginatedPurchases.map((p) => {
                 const taxable = Number(p.sub_total);
                 const gst = Number(p.gst_total);
 
@@ -336,6 +415,76 @@ export default function PurchaseGSTReport() {
             )}
           </tbody>
         </table>
+
+        {/* Pagination Footer */}
+        {!loading && selectedCompany && filteredPurchases.length > 0 && (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              background: "#ffffff",
+              padding: "16px 20px",
+              borderTop: "1px solid #e2e8f0",
+              boxShadow: "0 1px 3px rgba(0,0,0,0.02)"
+            }}
+          >
+            <div style={{ fontSize: "13.5px", color: "#64748b" }}>
+              Showing{" "}
+              <strong>
+                {(safePage - 1) * ITEMS_PER_PAGE + 1}–
+                {Math.min(safePage * ITEMS_PER_PAGE, filteredPurchases.length)}
+              </strong>{" "}
+              of <strong>{filteredPurchases.length}</strong> transactions
+            </div>
+
+            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+              <button
+                disabled={safePage === 1}
+                onClick={() => setCurrentPage((p) => p - 1)}
+                className="sl-page-btn"
+              >
+                <ChevronLeft size={16} />
+              </button>
+
+              {Array.from({ length: totalPages }, (_, i) => i + 1)
+                .filter(
+                  (p) =>
+                    p === 1 ||
+                    p === totalPages ||
+                    Math.abs(p - safePage) <= 1
+                )
+                .reduce((acc, p, i, arr) => {
+                  if (i > 0 && arr[i - 1] !== p - 1) acc.push("...");
+                  acc.push(p);
+                  return acc;
+                }, [])
+                .map((item, i) =>
+                  item === "..." ? (
+                    <span key={i} style={{ padding: "0 5px", color: "#94a3b8" }}>
+                      …
+                    </span>
+                  ) : (
+                    <button
+                      key={item}
+                      onClick={() => setCurrentPage(item)}
+                      className={`sl-page-btn ${safePage === item ? "active" : ""}`}
+                    >
+                      {item}
+                    </button>
+                  )
+                )}
+
+              <button
+                disabled={safePage === totalPages}
+                onClick={() => setCurrentPage((p) => p + 1)}
+                className="sl-page-btn"
+              >
+                <ChevronRight size={16} />
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

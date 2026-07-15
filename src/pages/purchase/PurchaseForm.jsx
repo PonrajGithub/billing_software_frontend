@@ -220,6 +220,118 @@ export default function PurchaseForm() {
     }
   };
 
+  // Perform complete required field local validation followed by backend API validation
+  const validateAllItems = async () => {
+    let hasLocalError = false;
+    const validatedLocalItems = items.map((item, index) => {
+      const errors = [];
+      
+      if (!item.product_name || !item.product_name.trim()) {
+        errors.push("Product name is required");
+      }
+      if (!item.category_id && !item.category_name) {
+        errors.push("Category is required");
+      }
+      if (!item.subcategory_id && !item.subcategory_name) {
+        errors.push("Subcategory is required");
+      }
+      if (!item.brand_id && !item.brand_name) {
+        errors.push("Brand is required");
+      }
+      if (item.price === undefined || item.price === null || parseFloat(item.price) <= 0) {
+        errors.push("Supplier price must be greater than 0");
+      }
+      if (item.selling_price === undefined || item.selling_price === null || parseFloat(item.selling_price) <= 0) {
+        errors.push("Selling price must be greater than 0");
+      }
+      if (item.quantity === undefined || item.quantity === null || parseInt(item.quantity) <= 0) {
+        errors.push("Quantity must be greater than 0");
+      }
+      if (!item.unit || !item.unit.trim()) {
+        errors.push("Unit is required");
+      }
+
+      if (errors.length > 0) {
+        hasLocalError = true;
+        return {
+          ...item,
+          status: "error",
+          errors: errors,
+          warnings: item.warnings || []
+        };
+      }
+
+      return {
+        ...item,
+        status: "valid",
+        errors: [],
+        warnings: item.warnings || []
+      };
+    });
+
+    if (hasLocalError) {
+      setItems(validatedLocalItems);
+      alert("Validation failed! Some required fields in the table are missing or invalid. Errored rows are highlighted in red.");
+      return null;
+    }
+
+    // Call backend validate_items API
+    try {
+      const res = await api.post("/purchase/validate_items", {
+        company_id: selectedCompany,
+        items: validatedLocalItems.map(item => ({
+          product_name: item.product_name,
+          product_code: item.product_code,
+          barcode: item.barcode,
+          category_name: item.category_name,
+          subcategory_name: item.subcategory_name,
+          brand_name: item.brand_name,
+          price: item.price,
+          selling_price: item.selling_price || 0,
+          selling_price_per_unit: item.selling_price_per_unit || "",
+          quantity: item.quantity,
+          unit: item.unit,
+          gst_percentage: item.gst_percentage
+        }))
+      });
+
+      if (res.data.status) {
+        const validated = res.data.data;
+        const resolvedItems = validatedLocalItems.map((item, index) => {
+          const val = validated[index] || {};
+          return {
+            ...item,
+            product_id: val.product_id,
+            category_id: val.category_id || item.category_id,
+            subcategory_id: val.subcategory_id || item.subcategory_id,
+            brand_id: val.brand_id || item.brand_id,
+            status: val.status,
+            errors: [...(item.errors || []), ...(val.errors || [])],
+            warnings: val.warnings || []
+          };
+        });
+
+        setItems(resolvedItems);
+
+        // Check for any errors returned from backend
+        const hasBackendErrors = resolvedItems.some(item => item.status === "error");
+        if (hasBackendErrors) {
+          alert("Validation failed on server! Please check the errored rows highlighted in red.");
+          return null;
+        }
+
+        return resolvedItems;
+      } else {
+        alert("Server validation failed: " + res.data.message);
+        return null;
+      }
+    } catch (err) {
+      console.error(err);
+      alert("Error validating purchase items with server.");
+      return null;
+    }
+  };
+
   // Trigger Excel file template download
   const downloadTemplate = () => {
     const headers = [
@@ -379,20 +491,15 @@ export default function PurchaseForm() {
     };
     const updated = [...items, newRow];
     setItems(updated);
-    runBackendValidation(updated);
   };
 
   // Modify row inline
   const updateRowField = (index, field, value) => {
     const updated = [...items];
     updated[index][field] = value;
+    updated[index].status = "pending";
+    updated[index].errors = [];
     setItems(updated);
-
-    // Debounce backend check to avoid overloading
-    const timer = setTimeout(() => {
-      runBackendValidation(updated);
-    }, 400);
-    return () => clearTimeout(timer);
   };
 
   // Handle Category Select
@@ -407,7 +514,8 @@ export default function PurchaseForm() {
       subcategory_name: "",
       brand_id: "",
       brand_name: "",
-      status: "pending"
+      status: "pending",
+      errors: []
     };
     setItems(updated);
 
@@ -421,7 +529,6 @@ export default function PurchaseForm() {
         console.error(err);
       }
     }
-    runBackendValidation(updated);
   };
 
   // Handle Subcategory Select
@@ -437,7 +544,8 @@ export default function PurchaseForm() {
       subcategory_name: subcat ? subcat.name : "",
       brand_id: "",
       brand_name: "",
-      status: "pending"
+      status: "pending",
+      errors: []
     };
     setItems(updated);
 
@@ -452,7 +560,6 @@ export default function PurchaseForm() {
         console.error(err);
       }
     }
-    runBackendValidation(updated);
   };
 
   // Handle Brand Select
@@ -468,17 +575,16 @@ export default function PurchaseForm() {
       ...updated[index],
       brand_id: brandId,
       brand_name: brand ? brand.name : "",
-      status: "pending"
+      status: "pending",
+      errors: []
     };
     setItems(updated);
-    runBackendValidation(updated);
   };
 
   // Remove row
   const deleteRow = (index) => {
     const updated = items.filter((_, i) => i !== index);
     setItems(updated);
-    runBackendValidation(updated);
   };
 
   // Lookup product by code and auto-fill row fields
@@ -535,8 +641,8 @@ export default function PurchaseForm() {
   };
 
   // Calculation totals
-  const subTotal = items.reduce((sum, item) => sum + (item.quantity * item.price), 0);
-  const gstTotal = items.reduce((sum, item) => sum + ((item.quantity * item.price) * (item.gst_percentage / 100)), 0);
+  const subTotal = items.reduce((sum, item) => sum + ((Number(item.quantity) || 0) * (parseFloat(item.price) || 0)), 0);
+  const gstTotal = items.reduce((sum, item) => sum + (((Number(item.quantity) || 0) * (parseFloat(item.price) || 0)) * ((parseFloat(item.gst_percentage) || 0) / 100)), 0);
   const grandTotal = subTotal + gstTotal;
 
   // Actions
@@ -549,6 +655,10 @@ export default function PurchaseForm() {
       alert("Please select a supplier!");
       return;
     }
+
+    const validatedItems = await validateAllItems();
+    if (!validatedItems) return;
+
     setSaving(true);
     try {
       const res = await api.post("/purchase/save_draft", {
@@ -558,7 +668,7 @@ export default function PurchaseForm() {
         purchase_no: purchaseNo,
         purchase_date: purchaseDate,
         paid_amount: paidAmount,
-        items: items.map(item => ({
+        items: validatedItems.map(item => ({
           product_id: item.product_id,
           product_name: item.product_name,
           product_code: item.product_code,
@@ -600,16 +710,9 @@ export default function PurchaseForm() {
       alert("Please select a supplier!");
       return;
     }
-    if (items.length === 0) {
-      alert("Please add at least one item!");
-      return;
-    }
-    // Check if any row has status === "error"
-    const hasErrors = items.some(item => item.status === "error");
-    if (hasErrors) {
-      alert("Please resolve all row errors before submitting to inventory!");
-      return;
-    }
+
+    const validatedItems = await validateAllItems();
+    if (!validatedItems) return;
 
     if (!window.confirm("Submit purchase? This will commit items and update inventory stock values permanently.")) return;
 
@@ -622,7 +725,7 @@ export default function PurchaseForm() {
         purchase_no: purchaseNo,
         purchase_date: purchaseDate,
         paid_amount: paidAmount,
-        items: items.map(item => ({
+        items: validatedItems.map(item => ({
           product_id: item.product_id,
           product_name: item.product_name,
           product_code: item.product_code,
@@ -858,8 +961,14 @@ export default function PurchaseForm() {
                         };
                         const statusStyle = statusColors[item.status] || statusColors.pending;
 
+                        const isRowErrored = item.status === "error";
+
                         return (
-                          <tr key={index} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                          <tr key={index} style={{
+                            borderBottom: "1px solid #f1f5f9",
+                            outline: isRowErrored ? "1.5px solid #ef4444" : "none",
+                            backgroundColor: isRowErrored ? "#fff5f5" : "inherit"
+                          }}>
                             {/* Status */}
                             <td style={{ padding: "8px 10px", textAlign: "center" }}>
                               <div
@@ -891,7 +1000,9 @@ export default function PurchaseForm() {
                                 style={{
                                   width: "100%",
                                   padding: "6px 8px",
-                                  border: item.product_name ? "1px solid #e2e8f0" : "1.5px solid #ef4444",
+                                  border: isRowErrored && (!item.product_name || !item.product_name.trim())
+                                    ? "1.5px solid #ef4444"
+                                    : "1px solid #e2e8f0",
                                   borderRadius: "6px",
                                   fontSize: "13px",
                                   boxSizing: "border-box"
@@ -933,7 +1044,7 @@ export default function PurchaseForm() {
                                 value={item.category_id || ""}
                                 disabled={isLocked || !selectedCompany}
                                 onChange={(e) => handleCategoryChange(index, e.target.value)}
-                                style={{ width: "100%", padding: "6px 4px", border: "1px solid #e2e8f0", borderRadius: "6px", fontSize: "12.5px", background: "#ffffff", boxSizing: "border-box" }}
+                                style={{ width: "100%", padding: "6px 4px", border: isRowErrored && !item.category_id && !item.category_name ? "1.5px solid #ef4444" : "1px solid #e2e8f0", borderRadius: "6px", fontSize: "12.5px", background: "#ffffff", boxSizing: "border-box" }}
                               >
                                 <option value="">Select Category</option>
                                 {categories.map(c => (
@@ -947,7 +1058,7 @@ export default function PurchaseForm() {
                                 value={item.subcategory_id || ""}
                                 disabled={isLocked || !item.category_id}
                                 onChange={(e) => handleSubcategoryChange(index, e.target.value)}
-                                style={{ width: "100%", padding: "6px 4px", border: "1px solid #e2e8f0", borderRadius: "6px", fontSize: "12.5px", background: "#ffffff", boxSizing: "border-box" }}
+                                style={{ width: "100%", padding: "6px 4px", border: isRowErrored && !item.subcategory_id && !item.subcategory_name ? "1.5px solid #ef4444" : "1px solid #e2e8f0", borderRadius: "6px", fontSize: "12.5px", background: "#ffffff", boxSizing: "border-box" }}
                               >
                                 <option value="">Select Subcategory</option>
                                 {(companySubcategories[item.category_id] || []).map(s => (
@@ -961,7 +1072,7 @@ export default function PurchaseForm() {
                                 value={item.brand_id || ""}
                                 disabled={isLocked || !item.subcategory_id}
                                 onChange={(e) => handleBrandChange(index, e.target.value)}
-                                style={{ width: "100%", padding: "6px 4px", border: "1px solid #e2e8f0", borderRadius: "6px", fontSize: "12.5px", background: "#ffffff", boxSizing: "border-box" }}
+                                style={{ width: "100%", padding: "6px 4px", border: isRowErrored && !item.brand_id && !item.brand_name ? "1.5px solid #ef4444" : "1px solid #e2e8f0", borderRadius: "6px", fontSize: "12.5px", background: "#ffffff", boxSizing: "border-box" }}
                               >
                                 <option value="">Select Brand</option>
                                 {(companyBrands[`${item.category_id}-${item.subcategory_id}`] || []).map(b => (
@@ -972,21 +1083,21 @@ export default function PurchaseForm() {
                             {/* Price */}
                             <td style={{ padding: "6px 5px" }}>
                               <input
-                                type="number"
+                                type="text"
                                 value={item.price}
                                 disabled={isLocked}
-                                onChange={(e) => updateRowField(index, "price", parseFloat(e.target.value) || 0)}
-                                style={{ width: "100%", padding: "6px 8px", border: "1px solid #e2e8f0", borderRadius: "6px", fontSize: "13px", boxSizing: "border-box" }}
+                                onChange={(e) => updateRowField(index, "price", e.target.value)}
+                                style={{ width: "100%", padding: "6px 8px", border: isRowErrored && (item.price === undefined || item.price === null || parseFloat(item.price) <= 0) ? "1.5px solid #ef4444" : "1px solid #e2e8f0", borderRadius: "6px", fontSize: "13px", boxSizing: "border-box" }}
                               />
                             </td>
                             {/* Selling Price */}
                             <td style={{ padding: "6px 5px" }}>
                               <input
-                                type="number"
-                                value={item.selling_price || 0}
+                                type="text"
+                                value={item.selling_price}
                                 disabled={isLocked}
-                                onChange={(e) => updateRowField(index, "selling_price", parseFloat(e.target.value) || 0)}
-                                style={{ width: "100%", padding: "6px 8px", border: "1px solid #e2e8f0", borderRadius: "6px", fontSize: "13px", boxSizing: "border-box" }}
+                                onChange={(e) => updateRowField(index, "selling_price", e.target.value)}
+                                style={{ width: "100%", padding: "6px 8px", border: isRowErrored && (item.selling_price === undefined || item.selling_price === null || parseFloat(item.selling_price) <= 0) ? "1.5px solid #ef4444" : "1px solid #e2e8f0", borderRadius: "6px", fontSize: "13px", boxSizing: "border-box" }}
                               />
                             </td>
                             {/* Selling Price per Unit */}
@@ -1010,7 +1121,7 @@ export default function PurchaseForm() {
                                 value={item.quantity}
                                 disabled={isLocked}
                                 onChange={(e) => updateRowField(index, "quantity", parseInt(e.target.value) || 0)}
-                                style={{ width: "100%", padding: "6px 8px", border: "1px solid #e2e8f0", borderRadius: "6px", fontSize: "13px", boxSizing: "border-box" }}
+                                style={{ width: "100%", padding: "6px 8px", border: isRowErrored && (item.quantity === undefined || item.quantity === null || parseInt(item.quantity) <= 0) ? "1.5px solid #ef4444" : "1px solid #e2e8f0", borderRadius: "6px", fontSize: "13px", boxSizing: "border-box" }}
                               />
                             </td>
                             {/* Unit */}
@@ -1019,7 +1130,7 @@ export default function PurchaseForm() {
                                 value={item.unit || ""}
                                 disabled={isLocked}
                                 onChange={(e) => updateRowField(index, "unit", e.target.value)}
-                                style={{ width: "100%", padding: "6px 4px", border: "1px solid #e2e8f0", borderRadius: "6px", fontSize: "12.5px", background: "#ffffff", boxSizing: "border-box" }}
+                                style={{ width: "100%", padding: "6px 4px", border: isRowErrored && (!item.unit || !item.unit.trim()) ? "1.5px solid #ef4444" : "1px solid #e2e8f0", borderRadius: "6px", fontSize: "12.5px", background: "#ffffff", boxSizing: "border-box" }}
                               >
                                 <option value="">Select Unit</option>
                                 {unitOptions.map(opt => (

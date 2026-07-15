@@ -1,9 +1,14 @@
 import axios from "axios";
 
-export const API_BASE_URL = "http://localhost:8000/api/";
-// export const API_BASE_URL = "https://myricekart.in/backend/public/api/";
-export const API_BASE_URL_IMAGE = "http://localhost:8000/public";
-// export const API_BASE_URL_IMAGE = "https://myricekart.in/backend/public";
+const isLocalhost = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+
+export const API_BASE_URL = isLocalhost
+  ? "http://localhost:8000/api/"
+  : "https://myricekart.in/backend/public/api/";
+
+export const API_BASE_URL_IMAGE = isLocalhost
+  ? "http://localhost:8000/public"
+  : "https://myricekart.in/backend/public";
 
 // Axios instance
 const api = axios.create({
