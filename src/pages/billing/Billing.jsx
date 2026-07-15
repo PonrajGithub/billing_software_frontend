@@ -2007,7 +2007,8 @@ const pendingBalance =
 
   /* ── If credit_enabled becomes "0", switch away from credit ── */
   useEffect(() => {
-    if (customer.credit_enabled !== "1" && paymentMethod === "credit") {
+    // if (customer.credit_enabled !== "1" && paymentMethod === "credit") {
+    if (Number(customer.credit_enabled) !== 1 && paymentMethod === "credit") {
       setPaymentMethod("cash");
     }
   }, [customer.credit_enabled]);
@@ -2367,7 +2368,8 @@ if (
       showToast("Enter received amount!", "error"); return;
     }
 
-    if (paymentMethod === "credit" && customer.credit_enabled == "1") {
+    // if (paymentMethod === "credit" && customer.credit_enabled == "1") { 
+    if (paymentMethod === "credit" && Number(customer.credit_enabled) === 1) {
       const limit = parseFloat(customer.credit_limit) || 0;
       if (limit > 0 && total > limit) {
         showToast(`Purchase ₹${total.toFixed(2)} exceeds credit limit ₹${limit.toLocaleString()}!`, "error");
@@ -2435,7 +2437,8 @@ if (!selectedCompany) {
     { val:"upi",    label:"📲 UPI",    color:"#7c3aed", bg:"#f5f3ff", border:"#ddd6fe", activeBg:"linear-gradient(135deg,#6d28d9,#8b5cf6)" },
     {
       val:"credit", label:"🧾 Credit", color:"#dc2626", bg:"#fef2f2", border:"#fecaca", activeBg:"linear-gradient(135deg,#dc2626,#ef4444)",
-      disabled: customer.credit_enabled !== "1",
+      // disabled: customer.credit_enabled !== "1",
+      disabled: Number(customer.credit_enabled) !== 1,
       disabledTitle: "Credit not enabled for this customer",
     },
   ];
@@ -2611,7 +2614,8 @@ if (!selectedCompany) {
                 </div>
               )}
               {/* Credit badge */}
-              {customer.id && customer.credit_enabled === "1" && (
+              {/* {customer.id && customer.credit_enabled === "1" && (  */}
+               {customer.id && Number(customer.credit_enabled) === 1 && (
                 <div style={{
                   display:"flex", alignItems:"center", gap:6,
                   background:"#fef2f2", border:"1.5px solid #fecaca",
@@ -3095,7 +3099,8 @@ if (!selectedCompany) {
             <label style={{ fontSize:11, fontWeight:600, color:"#6366f1", letterSpacing:".08em", textTransform:"uppercase", display:"block", marginBottom:8 }}>
               Payment Method
             </label>
-            {customer.id && customer.credit_enabled !== "1" && (
+            {/* {customer.id && customer.credit_enabled !== "1" && ( */}
+             {customer.id && Number(customer.credit_enabled) !== 1 && (
               <div style={{
                 fontSize:11.5, color:"#94a3b8", fontWeight:500,
                 background:"#f8faff", borderRadius:8, padding:"6px 12px",
